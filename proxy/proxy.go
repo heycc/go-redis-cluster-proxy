@@ -9,6 +9,8 @@ type Conn interface {
 
 	Do(cmd string, args ...interface{}) (reply interface{}, err error)
 
+	GetResponse() []byte
+
 	//Send(commandName string, args ...interface{}) error
 
 	// Flush flushes the output buffer to the Redis server.

@@ -54,12 +54,21 @@ func (c *conn) readLine() ([]byte, error) {
 	return p[:i], nil
 }
 
+func (c *conn) readLen(len int64) ([]byte, error) {
+	p := make([]byte, len)
+	_, err := io.ReadFull(c.br, p)
+	c.bufferResponse(p)
+	return p, err
+}
+
 func (c *conn) bufferResponse(resp []byte) error {
 	// buffer response
 	c.response = append(c.response, resp...)
-	c.response = append(c.response, '\n')
-	fmt.Println(string(c.response))
 	return nil
+}
+
+func (c *conn) GetResponse() []byte {
+	return c.response
 }
 
 func parseLen(p []byte) (int64, error) {
@@ -102,8 +111,7 @@ func (c *conn) readReply() (interface{}, error) {
 		if n < 0 || err != nil {
 			return nil, err
 		}
-		p := make([]byte, n)
-		_, err = io.ReadFull(c.br, p)
+		p, err := c.readLen(n)
 		if err != nil {
 			return nil, err
 		}
@@ -112,7 +120,7 @@ func (c *conn) readReply() (interface{}, error) {
 		} else if len(line) != 0 {
 			return nil, protocolError("bad bulk string format")
 		}
-		c.bufferResponse(p)
+		
 		return p, nil
 	case '*':
 		n, err := parseLen(line[1:])
@@ -139,6 +147,7 @@ func (c *conn) Do(cmd string, args ...interface{}) (interface{}, error) {
 	if err := c.bw.Flush(); err != nil {
 		return nil, protocolError("flush error")
 	}
+	// return p, nil
 	var reply interface{}
 	var e error
 	if reply, e = c.readReply(); e != nil {
