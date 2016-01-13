@@ -2,27 +2,17 @@ package proxy
 
 import (
 	"bufio"
-	//"bytes"
-	//"errors"
 	"fmt"
 	"io"
 	"net"
+	"regexp"
 	"strconv"
-	//"sync"
 	"time"
 )
 
-type conn struct {
-	conn    net.Conn
-	// Read
-	readTimeout time.Duration
-	br          *bufio.Reader
-	// Write
-	writeTimeout time.Duration
-	bw           *bufio.Writer
-
-	command		[]byte
-	response	[]byte
+type Conn interface {
+	Do(cmd string) (reply interface{}, err error)
+	GetResponse() []byte
 }
 
 // NewConn returns a new connection.
@@ -31,24 +21,37 @@ func NewConn(netConn net.Conn, readTimeout, writeTimeout int64) Conn {
 		conn:         netConn,
 		bw:           bufio.NewWriter(netConn),
 		br:           bufio.NewReader(netConn),
-		readTimeout:  time.Duration(readTimeout)*time.Millisecond,
-		writeTimeout: time.Duration(readTimeout)*time.Millisecond,
-		command:	make([]byte, 0),
-		response:	make([]byte, 0),
+		readTimeout:  time.Duration(readTimeout) * time.Millisecond,
+		writeTimeout: time.Duration(readTimeout) * time.Millisecond,
+		command:      make([]byte, 0),
+		response:     make([]byte, 0),
 	}
+}
+
+type conn struct {
+	conn net.Conn
+	// Read
+	readTimeout time.Duration
+	br          *bufio.Reader
+	// Write
+	writeTimeout time.Duration
+	bw           *bufio.Writer
+
+	command  []byte
+	response []byte
 }
 
 func (c *conn) readLine() ([]byte, error) {
 	p, err := c.br.ReadSlice('\n')
 	if err == bufio.ErrBufferFull {
-		return nil, protocolError("long response line")
+		return nil, protocolError("response longer that buffer")
 	}
 	if err != nil {
 		return nil, err
 	}
 	i := len(p) - 2
 	if i < 0 || p[i] != '\r' {
-		return nil, protocolError("bad response line terminator")
+		return nil, protocolError("bad response length or line terminator")
 	}
 	c.bufferResponse(p)
 	return p[:i], nil
@@ -62,7 +65,6 @@ func (c *conn) readLen(len int64) ([]byte, error) {
 }
 
 func (c *conn) bufferResponse(resp []byte) error {
-	// buffer response
 	c.response = append(c.response, resp...)
 	return nil
 }
@@ -94,16 +96,32 @@ func (c *conn) readReply() (interface{}, error) {
 	case '+':
 		switch {
 		case len(line) == 3 && line[1] == 'O' && line[2] == 'K':
-			// Avoid allocation for frequent "+OK" response.
 			return okReply, nil
 		case len(line) == 5 && line[1] == 'P' && line[2] == 'O' && line[3] == 'N' && line[4] == 'G':
-			// Avoid allocation in PING command benchmarks :)
 			return pongReply, nil
 		default:
 			return string(line[1:]), nil
 		}
 	case '-':
-		return Error(string(line[1:])), nil
+		lineArr := regexp.MustCompile(" +").Split(string(line), 4)
+		switch {
+		// MOVED 1180 127.0.0.1:7101
+		case len(lineArr) == 3 && lineArr[0] == "-MOVED":
+			slot, err := strconv.ParseInt(lineArr[1], 10, 64)
+			if err != nil {
+				return nil, protocolError("MOVED error parse slot failed: " + err.Error())
+			}
+			return nil, &movedError{Slot: slot, Address: lineArr[2]}
+		// ASK
+		case len(lineArr) == 3 && lineArr[0] == "-ASK":
+			slot, err := strconv.ParseInt(lineArr[1], 10, 64)
+			if err != nil {
+				return nil, protocolError("ASK error parse slot failed: " + err.Error())
+			}
+			return nil, &askError{Slot: slot, Address: lineArr[2]}
+		default:
+			return Error(string(line[1:])), nil
+		}
 	case ':':
 		return parseInt(line[1:])
 	case '$':
@@ -120,7 +138,7 @@ func (c *conn) readReply() (interface{}, error) {
 		} else if len(line) != 0 {
 			return nil, protocolError("bad bulk string format")
 		}
-		
+
 		return p, nil
 	case '*':
 		n, err := parseLen(line[1:])
@@ -139,29 +157,38 @@ func (c *conn) readReply() (interface{}, error) {
 	return nil, protocolError("unexpected response line")
 }
 
-func (c *conn) Do(cmd string, args ...interface{}) (interface{}, error) {
+func (c *conn) writeCmd(cmd string) error {
+	cmdArr := regexp.MustCompile(" +").Split(cmd, 99)
+	cmdStr := fmt.Sprintf("*%d\r\n", len(cmdArr))
+	for _, val := range cmdArr {
+		cmdStr += fmt.Sprintf("$%d\r\n", len(val))
+		cmdStr += fmt.Sprintf("%s\r\n", val)
+	}
+	c.bw.Write([]byte(cmdStr))
+	if err := c.bw.Flush(); err != nil {
+		return protocolError("flush error")
+	}
+	return nil
+}
+
+func (c *conn) Do(cmd string) (interface{}, error) {
 	if c.writeTimeout != 0 {
 		c.conn.SetWriteDeadline(time.Now().Add(c.writeTimeout))
 	}
-	c.bw.Write([]byte(cmd))
-	if err := c.bw.Flush(); err != nil {
-		return nil, protocolError("flush error")
+	c.writeCmd(cmd)
+	reply, err := c.readReply()
+	if err != nil {
+		switch err := err.(type) {
+		case *movedError:
+			return fmt.Sprintf("moved to %s", err.Address), nil
+		case *askError:
+			return fmt.Sprintf("ask %s", err.Address), nil
+		default:
+			return nil, protocolError(fmt.Sprintf("%T", err))
+		}
+	} else {
+		return reply, nil
 	}
-	// return p, nil
-	var reply interface{}
-	var e error
-	if reply, e = c.readReply(); e != nil {
-		return nil, protocolError("readReply error")
-	}
-	
-	return reply, nil
-}
-
-
-type protocolError string
-
-func (pe protocolError) Error() string {
-	return fmt.Sprintf("proxy: %s", string(pe))
 }
 
 var (
