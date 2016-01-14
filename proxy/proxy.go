@@ -1,8 +1,8 @@
 package proxy
 
 import (
-	"net"
 	"log"
+	"net"
 	"strconv"
 )
 
@@ -23,6 +23,7 @@ type Proxy struct {
 var (
 	SLOTSIZE = 16384
 )
+
 func NewProxy(address string) proxy {
 	net, err := net.Dial("tcp", address)
 	if err != nil {
@@ -31,10 +32,10 @@ func NewProxy(address string) proxy {
 	conn := NewConn(net, 10, 10)
 
 	p := &Proxy{
-		addrList:   nil,
-		chanSize:   2,
-		backend:    nil,
-		adminConn:  conn,
+		addrList:  nil,
+		chanSize:  2,
+		backend:   nil,
+		adminConn: conn,
 	}
 
 	p.init()
@@ -96,7 +97,7 @@ func (proxy *Proxy) initSlot() {
 							slot_port = tmp2
 						}
 					}
-					
+
 					// add node address to proxy.addrList
 					for i := slot_from; i <= slot_to; i++ {
 						tmpAddr := slot_addr + ":" + strconv.FormatInt(slot_port, 10)
@@ -131,7 +132,7 @@ func (proxy *Proxy) initBackend() {
 			log.Fatal("failed to dail node " + addr + " " + err.Error())
 		}
 		log.Println("init backend connection", addr, proxy.chanSize)
-		for i :=0; i < proxy.chanSize; i++ {
+		for i := 0; i < proxy.chanSize; i++ {
 			proxy.backend[addr] <- NewConn(conn, 10, 10)
 		}
 	}
@@ -139,7 +140,7 @@ func (proxy *Proxy) initBackend() {
 
 func (proxy *Proxy) Do(cmd string) (interface{}, error) {
 	defaultAddr := "127.0.0.1:7101"
-	conn := <- proxy.backend[defaultAddr]
+	conn := <-proxy.backend[defaultAddr]
 	conn.writeCmd(cmd)
 	reply, err := conn.readReply()
 	proxy.backend[defaultAddr] <- conn
@@ -148,12 +149,12 @@ func (proxy *Proxy) Do(cmd string) (interface{}, error) {
 		switch err := err.(type) {
 		case *movedError:
 			realAddr := err.Address
-			conn = <- proxy.backend[realAddr]
+			conn = <-proxy.backend[realAddr]
 			conn.writeCmd(cmd)
 			return conn.readReply()
 		case *askError:
 			realAddr := err.Address
-			conn = <- proxy.backend[realAddr]
+			conn = <-proxy.backend[realAddr]
 			conn.writeCmd("ASKING")
 			_, tmpErr := conn.readReply()
 			if tmpErr != nil {
