@@ -13,6 +13,8 @@ import (
 type Conn interface {
 	Do(cmd string) (reply interface{}, err error)
 	GetResponse() []byte
+	writeCmd(string) error
+	readReply() (interface{}, error)
 }
 
 // NewConn returns a new connection.

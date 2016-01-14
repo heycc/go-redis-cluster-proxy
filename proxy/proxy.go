@@ -9,6 +9,7 @@ import (
 type proxy interface {
 	//initBackend() error
 	Close() error
+	Do(string) (interface{}, error)
 }
 type Proxy struct {
 	totalSlots int
@@ -45,12 +46,22 @@ func (proxy *Proxy) Close() error {
 	return nil
 }
 
+// checkState check that cluster is available
+func (proxy *Proxy) checkState() error {
+	// TODO
+	return nil
+}
+
 func (proxy *Proxy) init() {
 	proxy.totalSlots = SLOTSIZE
 	proxy.slotMap = make([]string, proxy.totalSlots)
 	proxy.addrList = make([]string, 0)
 
 	// TODO: check redis cluster is READY!
+	err := proxy.checkState()
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	proxy.initSlot()
 	proxy.initBackend()
@@ -126,4 +137,34 @@ func (proxy *Proxy) initBackend() {
 	}
 }
 
-
+func (proxy *Proxy) Do(cmd string) (interface{}, error) {
+	defaultAddr := "127.0.0.1:7101"
+	conn := <- proxy.backend[defaultAddr]
+	conn.writeCmd(cmd)
+	reply, err := conn.readReply()
+	proxy.backend[defaultAddr] <- conn
+	if err != nil {
+		// log.Printf("error %s", err.Error())
+		switch err := err.(type) {
+		case *movedError:
+			realAddr := err.Address
+			conn = <- proxy.backend[realAddr]
+			conn.writeCmd(cmd)
+			return conn.readReply()
+		case *askError:
+			realAddr := err.Address
+			conn = <- proxy.backend[realAddr]
+			conn.writeCmd("ASKING")
+			_, tmpErr := conn.readReply()
+			if tmpErr != nil {
+				log.Println("asking failed", tmpErr.Error())
+			}
+			conn.writeCmd(cmd)
+			return conn.readReply()
+		default:
+			return reply, err
+		}
+	} else {
+		return reply, err
+	}
+}
