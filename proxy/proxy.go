@@ -43,7 +43,9 @@ func NewProxy(address string) proxy {
 	return p
 }
 
+// close connection
 func (proxy *Proxy) Close() error {
+	// TODO
 	return nil
 }
 
@@ -151,7 +153,9 @@ func (proxy *Proxy) Do(cmd string) (interface{}, error) {
 			realAddr := err.Address
 			conn = <-proxy.backend[realAddr]
 			conn.writeCmd(cmd)
-			return conn.readReply()
+			tmp, err := conn.readReply()
+			proxy.backend[realAddr] <- conn
+			return tmp, err
 		case *askError:
 			realAddr := err.Address
 			conn = <-proxy.backend[realAddr]
@@ -161,7 +165,9 @@ func (proxy *Proxy) Do(cmd string) (interface{}, error) {
 				log.Println("asking failed", tmpErr.Error())
 			}
 			conn.writeCmd(cmd)
-			return conn.readReply()
+			tmp, err := conn.readReply()
+			proxy.backend[realAddr] <- conn
+			return tmp, err
 		default:
 			return reply, err
 		}
