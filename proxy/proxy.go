@@ -6,12 +6,12 @@ import (
 	"strconv"
 )
 
-type proxy interface {
+type Proxy interface {
 	//initBackend() error
 	Close() error
 	Do(string) (interface{}, error)
 }
-type Proxy struct {
+type proxy struct {
 	totalSlots int
 	slotMap    []string
 	addrList   []string
@@ -24,14 +24,14 @@ var (
 	SLOTSIZE = 16384
 )
 
-func NewProxy(address string) proxy {
+func NewProxy(address string) Proxy {
 	net, err := net.Dial("tcp", address)
 	if err != nil {
 		log.Fatal("failed to dail cluster " + address + " " + err.Error())
 	}
 	conn := NewConn(net, 10, 10)
 
-	p := &Proxy{
+	p := &proxy{
 		addrList:  nil,
 		chanSize:  2,
 		backend:   nil,
@@ -44,18 +44,18 @@ func NewProxy(address string) proxy {
 }
 
 // close connection
-func (proxy *Proxy) Close() error {
+func (proxy *proxy) Close() error {
 	// TODO
 	return nil
 }
 
 // checkState check that cluster is available
-func (proxy *Proxy) checkState() error {
+func (proxy *proxy) checkState() error {
 	// TODO
 	return nil
 }
 
-func (proxy *Proxy) init() {
+func (proxy *proxy) init() {
 	proxy.totalSlots = SLOTSIZE
 	proxy.slotMap = make([]string, proxy.totalSlots)
 	proxy.addrList = make([]string, 0)
@@ -71,7 +71,7 @@ func (proxy *Proxy) init() {
 }
 
 // initSlot get nodes list and slot distribution
-func (proxy *Proxy) initSlot() {
+func (proxy *proxy) initSlot() {
 	conn := proxy.adminConn
 	reply, err := conn.Do("cluster slots")
 
@@ -125,7 +125,7 @@ func (proxy *Proxy) initSlot() {
 }
 
 // initBackend init connection to all redis nodes
-func (proxy *Proxy) initBackend() {
+func (proxy *proxy) initBackend() {
 	proxy.backend = make(map[string](chan Conn), len(proxy.addrList))
 	for _, addr := range proxy.addrList {
 		proxy.backend[addr] = make(chan Conn, proxy.chanSize)
@@ -140,34 +140,57 @@ func (proxy *Proxy) initBackend() {
 	}
 }
 
-func (proxy *Proxy) Do(cmd string) (interface{}, error) {
-	defaultAddr := "127.0.0.1:7101"
-	conn := <-proxy.backend[defaultAddr]
+func (proxy *proxy) Do(cmd string) (interface{}, error) {
+	// TODO: compute the slot of `cmd`, then get addr from slotMap
+	theAddr := "127.0.0.1:7101"
+	conn := <-proxy.backend[theAddr]
 	conn.writeCmd(cmd)
 	reply, err := conn.readReply()
-	proxy.backend[defaultAddr] <- conn
+	proxy.backend[theAddr] <- conn
+
 	if err != nil {
-		// log.Printf("error %s", err.Error())
 		switch err := err.(type) {
 		case *movedError:
-			realAddr := err.Address
-			conn = <-proxy.backend[realAddr]
+		// get MOVED error for the first time, follow new address
+			theAddr = err.Address
+			conn = <-proxy.backend[theAddr]
 			conn.writeCmd(cmd)
-			tmp, err := conn.readReply()
-			proxy.backend[realAddr] <- conn
-			return tmp, err
+			reply_2, err_2 := conn.readReply()
+			proxy.backend[theAddr] <- conn
+
+			switch err_2 := err_2.(type) {
+			case *askError:
+			// ASK error after MOVED error, follow new address
+				theAddr = err_2.Address
+				conn = <-proxy.backend[theAddr]
+				conn.writeCmd("ASKING")
+				_, err_3 := conn.readReply()
+				if err_3 != nil {
+					return nil, Error("asking failed " + err_3.Error())
+				}
+				conn.writeCmd(cmd)
+				defer func() {proxy.backend[theAddr] <- conn} ()
+				return conn.readReply()
+			case *movedError:
+			// MOVED error after MOVED error, this shouldn't happen
+				return nil, Error("Error! MOVED after MOVED")
+			default:
+				return reply_2, err_2
+			}
+
 		case *askError:
-			realAddr := err.Address
-			conn = <-proxy.backend[realAddr]
+		// get ASK error for the first time, follow new address
+			theAddr := err.Address
+			conn = <-proxy.backend[theAddr]
 			conn.writeCmd("ASKING")
-			_, tmpErr := conn.readReply()
-			if tmpErr != nil {
-				log.Println("asking failed", tmpErr.Error())
+			_, err_2 := conn.readReply()
+			if err_2 != nil {
+				return nil, Error("asking failed " + err_2.Error())
 			}
 			conn.writeCmd(cmd)
-			tmp, err := conn.readReply()
-			proxy.backend[realAddr] <- conn
-			return tmp, err
+			defer func() {proxy.backend[theAddr] <- conn} ()
+			return conn.readReply()
+			
 		default:
 			return reply, err
 		}

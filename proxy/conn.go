@@ -122,7 +122,7 @@ func (c *conn) readReply() (interface{}, error) {
 			}
 			return nil, &askError{Slot: slot, Address: lineArr[2]}
 		default:
-			return Error(string(line[1:])), nil
+			return nil, Error(string(line[1:]))
 		}
 	case ':':
 		return parseInt(line[1:])
@@ -166,7 +166,11 @@ func (c *conn) writeCmd(cmd string) error {
 		cmdStr += fmt.Sprintf("$%d\r\n", len(val))
 		cmdStr += fmt.Sprintf("%s\r\n", val)
 	}
-	c.bw.Write([]byte(cmdStr))
+	return c.writeBytes([]byte(cmdStr))
+}
+
+func (c *conn) writeBytes(cmd []byte) error {
+	c.bw.Write(cmd)
 	if err := c.bw.Flush(); err != nil {
 		return protocolError("flush error")
 	}
