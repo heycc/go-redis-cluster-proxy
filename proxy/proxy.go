@@ -140,36 +140,49 @@ func (proxy *proxy) initBackend() {
 	}
 }
 
+func (proxy *proxy) getConn(addr string) Conn {
+	conn := <-proxy.backend[addr]
+	return conn
+}
+
+func (proxy *proxy) returnConn(addr string, conn Conn) error {
+	conn.clear()
+	proxy.backend[addr] <- conn
+	return nil
+}
+
 func (proxy *proxy) Do(cmd string) (interface{}, error) {
 	// TODO: compute the slot of `cmd`, then get addr from slotMap
 	theAddr := "127.0.0.1:7101"
-	conn := <-proxy.backend[theAddr]
+	conn := proxy.getConn(theAddr)
 	conn.writeCmd(cmd)
 	reply, err := conn.readReply()
-	proxy.backend[theAddr] <- conn
+	
+	proxy.returnConn(theAddr, conn)
 
 	if err != nil {
 		switch err := err.(type) {
 		case *movedError:
 		// get MOVED error for the first time, follow new address
 			theAddr = err.Address
-			conn = <-proxy.backend[theAddr]
+			conn = proxy.getConn(theAddr)
 			conn.writeCmd(cmd)
 			reply_2, err_2 := conn.readReply()
-			proxy.backend[theAddr] <- conn
+			proxy.returnConn(theAddr, conn)
 
 			switch err_2 := err_2.(type) {
 			case *askError:
 			// ASK error after MOVED error, follow new address
 				theAddr = err_2.Address
-				conn = <-proxy.backend[theAddr]
+				conn = proxy.getConn(theAddr)
+				defer proxy.returnConn(theAddr, conn)
+
 				conn.writeCmd("ASKING")
 				_, err_3 := conn.readReply()
 				if err_3 != nil {
 					return nil, Error("asking failed " + err_3.Error())
 				}
 				conn.writeCmd(cmd)
-				defer func() {proxy.backend[theAddr] <- conn} ()
 				return conn.readReply()
 			case *movedError:
 			// MOVED error after MOVED error, this shouldn't happen
@@ -181,14 +194,14 @@ func (proxy *proxy) Do(cmd string) (interface{}, error) {
 		case *askError:
 		// get ASK error for the first time, follow new address
 			theAddr := err.Address
-			conn = <-proxy.backend[theAddr]
+			conn = proxy.getConn(theAddr)
+			defer proxy.returnConn(theAddr, conn)
 			conn.writeCmd("ASKING")
 			_, err_2 := conn.readReply()
 			if err_2 != nil {
 				return nil, Error("asking failed " + err_2.Error())
 			}
 			conn.writeCmd(cmd)
-			defer func() {proxy.backend[theAddr] <- conn} ()
 			return conn.readReply()
 			
 		default:

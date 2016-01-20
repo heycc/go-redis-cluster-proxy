@@ -11,10 +11,16 @@ import (
 )
 
 type Conn interface {
+	// execute a redis command
 	Do(cmd string) (reply interface{}, err error)
+	// get buffered response
 	GetResponse() []byte
+	// write string command
 	writeCmd(string) error
+	// get reply from redis server
 	readReply() (interface{}, error)
+	// clear connection buffer info
+	clear() error
 }
 
 // NewConn returns a new connection.
@@ -73,6 +79,12 @@ func (c *conn) bufferResponse(resp []byte) error {
 
 func (c *conn) GetResponse() []byte {
 	return c.response
+}
+
+func (c *conn) clear() error {
+	c.response = nil
+	c.command = nil
+	return nil
 }
 
 func parseLen(p []byte) (int64, error) {
