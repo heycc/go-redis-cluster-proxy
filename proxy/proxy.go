@@ -11,6 +11,7 @@ type Proxy interface {
 	Close() error
 	Do(string) (interface{}, error)
 }
+
 type proxy struct {
 	totalSlots int
 	slotMap    []string
@@ -20,9 +21,7 @@ type proxy struct {
 	adminConn  Conn
 }
 
-var (
-	SLOTSIZE = 16384
-)
+const SLOTSIZE = 16384
 
 func NewProxy(address string) Proxy {
 	net, err := net.Dial("tcp", address)
