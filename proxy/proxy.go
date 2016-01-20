@@ -31,6 +31,8 @@ func NewProxy(address string) Proxy {
 	conn := NewConn(net, 10, 10)
 
 	p := &proxy{
+		totalSlots: SLOTSIZE,
+		slotMap: nil,
 		addrList:  nil,
 		chanSize:  2,
 		backend:   nil,
@@ -55,7 +57,6 @@ func (proxy *proxy) checkState() error {
 }
 
 func (proxy *proxy) init() {
-	proxy.totalSlots = SLOTSIZE
 	proxy.slotMap = make([]string, proxy.totalSlots)
 	proxy.addrList = make([]string, 0)
 
@@ -65,12 +66,12 @@ func (proxy *proxy) init() {
 		log.Fatal(err)
 	}
 
-	proxy.initSlot()
+	proxy.initSlotMap()
 	proxy.initBackend()
 }
 
-// initSlot get nodes list and slot distribution
-func (proxy *proxy) initSlot() {
+// initSlotMap get nodes list and slot distribution
+func (proxy *proxy) initSlotMap() {
 	conn := proxy.adminConn
 	reply, err := conn.Do("cluster slots")
 
