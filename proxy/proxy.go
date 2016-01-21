@@ -141,8 +141,7 @@ func (proxy *proxy) initBackend() {
 }
 
 func (proxy *proxy) getConn(addr string) Conn {
-	conn := <-proxy.backend[addr]
-	return conn
+	return <-proxy.backend[addr]
 }
 
 func (proxy *proxy) returnConn(addr string, conn Conn) error {
