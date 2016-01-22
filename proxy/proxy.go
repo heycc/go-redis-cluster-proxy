@@ -9,14 +9,14 @@ import (
 type Proxy interface {
 	//initBackend() error
 	Close() error
-	Do(string) (interface{}, error)
+	Do([]byte) ([]byte, error)
 }
 
 type proxy struct {
 	totalSlots int
 	slotMap    []string
 	addrList   []string
-	chanSize   int
+	chanSize   uint8
 	backend    map[string](chan Conn)
 	adminConn  Conn
 }
@@ -150,13 +150,14 @@ func (proxy *proxy) returnConn(addr string, conn Conn) error {
 	return nil
 }
 
-func (proxy *proxy) Do(cmd string) (interface{}, error) {
+func (proxy *proxy) Do(cmd []byte) (reply []byte, err error) {
 	// TODO: compute the slot of `cmd`, then get addr from slotMap
 	theAddr := "127.0.0.1:7101"
 	conn := proxy.getConn(theAddr)
-	conn.writeCmd(cmd)
-	reply, err := conn.readReply()
-	
+
+	conn.writeBytes(cmd)
+	_, err := conn.readReply()
+	resp = conn.getResponse()
 	proxy.returnConn(theAddr, conn)
 
 	if err != nil {
@@ -165,8 +166,10 @@ func (proxy *proxy) Do(cmd string) (interface{}, error) {
 		// get MOVED error for the first time, follow new address
 			theAddr = err.Address
 			conn = proxy.getConn(theAddr)
-			conn.writeCmd(cmd)
-			reply_2, err_2 := conn.readReply()
+
+			conn.writeBytes(cmd)
+			_, err_2 := conn.readReply()
+			reply = conn.getResponse()
 			proxy.returnConn(theAddr, conn)
 
 			switch err_2 := err_2.(type) {
@@ -174,14 +177,17 @@ func (proxy *proxy) Do(cmd string) (interface{}, error) {
 			// ASK error after MOVED error, follow new address
 				theAddr = err_2.Address
 				conn = proxy.getConn(theAddr)
-				defer proxy.returnConn(theAddr, conn)
 
 				conn.writeCmd("ASKING")
 				_, err_3 := conn.readReply()
+				reply = conn.getResponse()
+				proxy.returnConn(theAddr, conn)
 				if err_3 != nil {
-					return nil, Error("asking failed " + err_3.Error())
+					// TODO: error handle
+					fmt.Println(Error("asking failed " + err_3.Error()))
+					return nil
 				}
-				conn.writeCmd(cmd)
+				conn.writeBytes(cmd)
 				return conn.readReply()
 			case *movedError:
 			// MOVED error after MOVED error, this shouldn't happen
@@ -200,7 +206,7 @@ func (proxy *proxy) Do(cmd string) (interface{}, error) {
 			if err_2 != nil {
 				return nil, Error("asking failed " + err_2.Error())
 			}
-			conn.writeCmd(cmd)
+			conn.writeBytes(cmd)
 			return conn.readReply()
 			
 		default:

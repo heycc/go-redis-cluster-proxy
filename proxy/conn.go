@@ -14,11 +14,15 @@ type Conn interface {
 	// execute a redis command
 	Do(cmd string) (reply interface{}, err error)
 	// get buffered response
-	GetResponse() []byte
+	getResponse() []byte
 	// write string command
 	writeCmd(string) error
-	// get reply from redis server
+	// write raw bytes
+	writeBytes([]byte) error
+	// get response remote
 	readReply() (interface{}, error)
+	// get raw bytes of response
+	// readBytes() ([]byte, error)
 	// clear connection buffer info
 	clear() error
 }
@@ -31,7 +35,6 @@ func NewConn(netConn net.Conn, readTimeout, writeTimeout int64) Conn {
 		br:           bufio.NewReader(netConn),
 		readTimeout:  time.Duration(readTimeout) * time.Millisecond,
 		writeTimeout: time.Duration(readTimeout) * time.Millisecond,
-		command:      make([]byte, 0),
 		response:     make([]byte, 0),
 	}
 }
@@ -45,7 +48,6 @@ type conn struct {
 	writeTimeout time.Duration
 	bw           *bufio.Writer
 
-	command  []byte
 	response []byte
 }
 
@@ -77,7 +79,7 @@ func (c *conn) bufferResponse(resp []byte) error {
 	return nil
 }
 
-func (c *conn) GetResponse() []byte {
+func (c *conn) getResponse() []byte {
 	return c.response
 }
 
