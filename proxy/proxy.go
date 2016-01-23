@@ -84,25 +84,22 @@ func (p *proxy) initSlotMap() {
 			slot_addr := string(addr_tmp[0].([]uint8))
 			slot_port := addr_tmp[1].(int64)
 
-			// add node address to proxy.addrList
+			tmpAddr := slot_addr + ":" + strconv.FormatInt(slot_port, 10)
 			for i := slot_from; i <= slot_to; i++ {
-				tmpAddr := slot_addr + ":" + strconv.FormatInt(slot_port, 10)
 				p.slotMap[i] = tmpAddr
+			}
 
-				isNew := true
-				for _, addr := range p.addrList {
-					if addr == tmpAddr {
-						isNew = false
-					}
-				}
-				if isNew {
-					p.addrList = append(p.addrList, tmpAddr)
+			// add node address to proxy.addrList
+			isNew := true
+			for _, addr := range p.addrList {
+				if addr == tmpAddr {
+					isNew = false
+					break
 				}
 			}
+			if isNew { p.addrList = append(p.addrList, tmpAddr) }
 		}
-	} else {
-		log.Fatal("cluster slots error. " + err.Error())
-	}
+	} else { log.Fatal("cluster slots error. " + err.Error()) }
 }
 
 // initBackend init connection to all redis nodes
