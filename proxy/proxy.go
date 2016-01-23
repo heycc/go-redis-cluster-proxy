@@ -9,7 +9,8 @@ import (
 type Proxy interface {
 	//initBackend() error
 	Close() error
-	Do([]byte) ([]byte, error)
+	do([]byte) ([]byte, error)
+	doAtSlot([]byte, int) ([]byte, error)
 }
 
 type proxy struct {
@@ -150,11 +151,18 @@ func (proxy *proxy) returnConn(addr string, conn Conn) error {
 	return nil
 }
 
-func (proxy *proxy) Do(cmd []byte) ([]byte, error) {
-	// TODO: compute the slot of `cmd`, then get addr from slotMap
-	theAddr := "127.0.0.1:7101"
-	conn := proxy.getConn(theAddr)
+func (proxy *proxy) do(cmd []byte) ([]byte, error) {
+	id := 0
+	return proxy.doAtSlot(cmd, id)
+}
 
+func (proxy *proxy) doAtSlot(cmd []byte, id int) ([]byte, error) {
+	if ! (id >= 0 && id < SLOTSIZE) {
+		return nil, Error("slot id out of range: " + string(id))
+	}
+
+	theAddr := proxy.slotMap[id]
+	conn := proxy.getConn(theAddr)
 	conn.writeBytes(cmd)
 	_, err := conn.readReply()
 	resp := conn.getResponse()

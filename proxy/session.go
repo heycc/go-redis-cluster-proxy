@@ -53,8 +53,8 @@ func (sess *session) Exec(proxy Proxy) error {
 		if ok := sess.readRequest(); ok != nil {
 			sess.conn.writeBytes([]byte("-readRequestFailed"))
 		}
-		command := sess.conn.getResponse()
-		reply, err := proxy.Do(command)
+		cmd := sess.conn.getResponse()
+		reply, err := proxy.do(cmd)
 		if err != nil {
 			reply = []byte("-CCERR")
 		}
