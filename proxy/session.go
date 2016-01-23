@@ -36,9 +36,9 @@ func (sess *session) readRequest() error {
 		if reply, ok := reply.([]interface{}); ok {
 			for _, ele := range reply {
 				if ele, ok := ele.([]uint8); ok {
-					fmt.Println(string(ele))
+					fmt.Println("in req", string(ele))
 				} else {
-					fmt.Println(ele)
+					fmt.Println("in req", ele)
 				}
 			}
 			return nil
@@ -49,18 +49,16 @@ func (sess *session) readRequest() error {
 }
 
 func (sess *session) Exec(proxy Proxy) error {
-	if ok := sess.readRequest(); ok != nil {
-		return sess.conn.writeBytes([]byte("-readRequestFailed"))
-	}
-	command := sess.conn.getResponse()
-	reply, err := proxy.Do(command)
-	if err != nil {
-		reply = []byte("-CCERR")
-	}
-	if reply, ok := reply.([]uint8); ok{
-		fmt.Println(reply)
-		return sess.conn.writeBytes(reply)
-	} else {
-		return sess.conn.writeBytes([]byte("-BADTYPE"))
+	for {
+		if ok := sess.readRequest(); ok != nil {
+			sess.conn.writeBytes([]byte("-readRequestFailed"))
+		}
+		command := sess.conn.getResponse()
+		reply, err := proxy.Do(command)
+		if err != nil {
+			reply = []byte("-CCERR")
+		}
+		sess.conn.writeBytes(reply)
+		sess.conn.clear()
 	}
 }

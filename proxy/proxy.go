@@ -16,7 +16,7 @@ type proxy struct {
 	totalSlots int
 	slotMap    []string
 	addrList   []string
-	chanSize   uint8
+	chanSize   int
 	backend    map[string](chan Conn)
 	adminConn  Conn
 }
@@ -150,14 +150,14 @@ func (proxy *proxy) returnConn(addr string, conn Conn) error {
 	return nil
 }
 
-func (proxy *proxy) Do(cmd []byte) (reply []byte, err error) {
+func (proxy *proxy) Do(cmd []byte) ([]byte, error) {
 	// TODO: compute the slot of `cmd`, then get addr from slotMap
 	theAddr := "127.0.0.1:7101"
 	conn := proxy.getConn(theAddr)
 
 	conn.writeBytes(cmd)
 	_, err := conn.readReply()
-	resp = conn.getResponse()
+	resp := conn.getResponse()
 	proxy.returnConn(theAddr, conn)
 
 	if err != nil {
@@ -166,53 +166,64 @@ func (proxy *proxy) Do(cmd []byte) (reply []byte, err error) {
 		// get MOVED error for the first time, follow new address
 			theAddr = err.Address
 			conn = proxy.getConn(theAddr)
-
 			conn.writeBytes(cmd)
-			_, err_2 := conn.readReply()
-			reply = conn.getResponse()
+			_, err2 := conn.readReply()
+			resp = conn.getResponse()
 			proxy.returnConn(theAddr, conn)
 
-			switch err_2 := err_2.(type) {
+			switch err2 := err2.(type) {
 			case *askError:
 			// ASK error after MOVED error, follow new address
-				theAddr = err_2.Address
+				theAddr = err2.Address
 				conn = proxy.getConn(theAddr)
-
 				conn.writeCmd("ASKING")
-				_, err_3 := conn.readReply()
-				reply = conn.getResponse()
-				proxy.returnConn(theAddr, conn)
-				if err_3 != nil {
-					// TODO: error handle
-					fmt.Println(Error("asking failed " + err_3.Error()))
-					return nil
+				if _, err3 := conn.readReply(); err3 != nil {
+					proxy.returnConn(theAddr, conn)
+					return nil, Error("ASKING failed " + err3.Error())
 				}
+				conn.clear()
 				conn.writeBytes(cmd)
-				return conn.readReply()
+				_, err3 := conn.readReply()
+				resp = conn.getResponse()
+				proxy.returnConn(theAddr, conn)
+
+				if err3 != nil {
+					return nil, err3
+				} else {
+					return resp, nil
+				}
+
 			case *movedError:
 			// MOVED error after MOVED error, this shouldn't happen
 				return nil, Error("Error! MOVED after MOVED")
 			default:
-				return reply_2, err_2
+				return resp, err2
 			}
 
 		case *askError:
 		// get ASK error for the first time, follow new address
 			theAddr := err.Address
 			conn = proxy.getConn(theAddr)
-			defer proxy.returnConn(theAddr, conn)
 			conn.writeCmd("ASKING")
-			_, err_2 := conn.readReply()
-			if err_2 != nil {
-				return nil, Error("asking failed " + err_2.Error())
+			if _, err3 := conn.readReply(); err3 != nil {
+				proxy.returnConn(theAddr, conn)
+				return nil, Error("ASKING failed " + err3.Error())
 			}
+			conn.clear()
 			conn.writeBytes(cmd)
-			return conn.readReply()
+			_, err3 := conn.readReply()
+			resp = conn.getResponse()
+			proxy.returnConn(theAddr, conn)
+			if err3 != nil {
+				return nil, err3
+			} else {
+				return resp, nil
+			}
 			
 		default:
-			return reply, err
+			return resp, err
 		}
 	} else {
-		return reply, err
+		return resp, nil
 	}
 }

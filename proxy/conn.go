@@ -85,7 +85,6 @@ func (c *conn) getResponse() []byte {
 
 func (c *conn) clear() error {
 	c.response = nil
-	c.command = nil
 	return nil
 }
 
