@@ -30,18 +30,15 @@ func NewProxy(address string) Proxy {
 		log.Fatal("failed to dail cluster " + address + " " + err.Error())
 	}
 	conn := NewConn(net, 10, 10)
-
 	p := &proxy{
 		totalSlots: SLOTSIZE,
-		slotMap: nil,
-		addrList:  nil,
-		chanSize:  2,
-		backend:   nil,
-		adminConn: conn,
+		slotMap:    nil,
+		addrList:   nil,
+		chanSize:   2,
+		backend:    nil,
+		adminConn:  conn,
 	}
-
 	p.init()
-
 	return p
 }
 
@@ -72,53 +69,36 @@ func (proxy *proxy) init() {
 }
 
 // initSlotMap get nodes list and slot distribution
-func (proxy *proxy) initSlotMap() {
-	conn := proxy.adminConn
-	reply, err := conn.Do("cluster slots")
+func (p *proxy) initSlotMap() {
+	p.adminConn.writeCmd("CLUSTER SLOTS")
+	reply, err := p.adminConn.readReply()
 
 	if err == nil {
-		if reply, ok := reply.([]interface{}); ok {
-			// For each slots range
-			for _, slots := range reply {
-				if slots, ok := slots.([]interface{}); ok {
-					var slot_from, slot_to, slot_port int64
-					var slot_addr string
-					tmp := slots[0]
-					if tmp, ok := tmp.(int64); ok {
-						slot_from = tmp
-					}
-					tmp = slots[1]
-					if tmp, ok := tmp.(int64); ok {
-						slot_to = tmp
-					}
-					tmp = slots[2]
-					if tmp, ok := tmp.([]interface{}); ok {
-						if tmp2, ok := tmp[0].([]uint8); ok {
-							slot_addr = string(tmp2)
-						}
-						if tmp2, ok := tmp[1].(int64); ok {
-							slot_port = tmp2
-						}
-					}
+		for _, slots := range reply.([]interface{}) {
+			slotsData := slots.([]interface{})
 
-					// add node address to proxy.addrList
-					for i := slot_from; i <= slot_to; i++ {
-						tmpAddr := slot_addr + ":" + strconv.FormatInt(slot_port, 10)
-						proxy.slotMap[i] = tmpAddr
+			slot_from := slotsData[0].(int64)
+			slot_to := slotsData[1].(int64)
 
-						newAddr := true
-						for _, addr := range proxy.addrList {
-							if addr == tmpAddr {
-								newAddr = false
-							}
-						}
-						if newAddr {
-							proxy.addrList = append(proxy.addrList, tmpAddr)
-						}
+			addr_tmp := slotsData[2].([]interface{})
+			slot_addr := string(addr_tmp[0].([]uint8))
+			slot_port := addr_tmp[1].(int64)
+
+			// add node address to proxy.addrList
+			for i := slot_from; i <= slot_to; i++ {
+				tmpAddr := slot_addr + ":" + strconv.FormatInt(slot_port, 10)
+				p.slotMap[i] = tmpAddr
+
+				isNew := true
+				for _, addr := range p.addrList {
+					if addr == tmpAddr {
+						isNew = false
 					}
 				}
+				if isNew {
+					p.addrList = append(p.addrList, tmpAddr)
+				}
 			}
-			log.Println("master nodes", proxy.addrList)
 		}
 	} else {
 		log.Fatal("cluster slots error. " + err.Error())
@@ -157,7 +137,7 @@ func (proxy *proxy) do(cmd []byte) ([]byte, error) {
 }
 
 func (proxy *proxy) doAtSlot(cmd []byte, id int) ([]byte, error) {
-	if ! (id >= 0 && id < SLOTSIZE) {
+	if !(id >= 0 && id < SLOTSIZE) {
 		return nil, Error("slot id out of range: " + string(id))
 	}
 
@@ -171,7 +151,7 @@ func (proxy *proxy) doAtSlot(cmd []byte, id int) ([]byte, error) {
 	if err != nil {
 		switch err := err.(type) {
 		case *movedError:
-		// get MOVED error for the first time, follow new address
+			// get MOVED error for the first time, follow new address
 			theAddr = err.Address
 			conn = proxy.getConn(theAddr)
 			conn.writeBytes(cmd)
@@ -181,7 +161,7 @@ func (proxy *proxy) doAtSlot(cmd []byte, id int) ([]byte, error) {
 
 			switch err2 := err2.(type) {
 			case *askError:
-			// ASK error after MOVED error, follow new address
+				// ASK error after MOVED error, follow new address
 				theAddr = err2.Address
 				conn = proxy.getConn(theAddr)
 				conn.writeCmd("ASKING")
@@ -202,14 +182,14 @@ func (proxy *proxy) doAtSlot(cmd []byte, id int) ([]byte, error) {
 				}
 
 			case *movedError:
-			// MOVED error after MOVED error, this shouldn't happen
+				// MOVED error after MOVED error, this shouldn't happen
 				return nil, Error("Error! MOVED after MOVED")
 			default:
 				return resp, err2
 			}
 
 		case *askError:
-		// get ASK error for the first time, follow new address
+			// get ASK error for the first time, follow new address
 			theAddr := err.Address
 			conn = proxy.getConn(theAddr)
 			conn.writeCmd("ASKING")
@@ -227,7 +207,7 @@ func (proxy *proxy) doAtSlot(cmd []byte, id int) ([]byte, error) {
 			} else {
 				return resp, nil
 			}
-			
+
 		default:
 			return resp, err
 		}

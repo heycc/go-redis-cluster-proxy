@@ -1,8 +1,8 @@
 package proxy
 
 import (
-	"net"
 	"fmt"
+	"net"
 	"time"
 )
 
@@ -11,19 +11,19 @@ type Session interface {
 }
 
 type session struct {
-	ts	time.Time
-	ops	uint64
-	microsecond	uint64
-	conn Conn
+	ts          time.Time
+	ops         uint64
+	microsecond uint64
+	conn        Conn
 }
 
-func NewSession (net net.Conn) Session {
+func NewSession(net net.Conn) Session {
 	conn := NewConn(net, 10, 10)
 	return &session{
-		ts: time.Now(),
-		ops: 0,
+		ts:          time.Now(),
+		ops:         0,
 		microsecond: 0,
-		conn: conn,
+		conn:        conn,
 	}
 }
 

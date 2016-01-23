@@ -12,7 +12,7 @@ import (
 
 type Conn interface {
 	// execute a redis command
-	Do(cmd string) (reply interface{}, err error)
+	// Do(cmd string) (reply interface{}, err error)
 	// get buffered response
 	getResponse() []byte
 	// write string command

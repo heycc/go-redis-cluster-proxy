@@ -3,6 +3,7 @@ package proxy
 import (
 	"bytes"
 )
+
 var crc16tab = [256]uint16{
 	0x0000, 0x1021, 0x2042, 0x3063, 0x4084, 0x50a5, 0x60c6, 0x70e7,
 	0x8108, 0x9129, 0xa14a, 0xb16b, 0xc18c, 0xd1ad, 0xe1ce, 0xf1ef,
@@ -39,14 +40,14 @@ var crc16tab = [256]uint16{
 
 func KeySlot(key []byte) (crc uint16) {
 	const (
-        TagBeg = '{'
-        TagEnd = '}'
-    )
-    if beg := bytes.IndexByte(key, TagBeg); beg >= 0 {
-        if end := bytes.IndexByte(key[beg+1:], TagEnd); end > 0 {
-            key = key[beg+1 : beg+1+end]
-        }
-    }
+		TagBeg = '{'
+		TagEnd = '}'
+	)
+	if beg := bytes.IndexByte(key, TagBeg); beg >= 0 {
+		if end := bytes.IndexByte(key[beg+1:], TagEnd); end > 0 {
+			key = key[beg+1 : beg+1+end]
+		}
+	}
 
 	l := len(key)
 	for i := 0; i < l; i++ {
