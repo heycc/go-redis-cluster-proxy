@@ -30,7 +30,7 @@ func NewSession(net net.Conn) Session {
 func (sess *session) readRequest() error {
 	reply, err := sess.conn.readReply()
 	if err != nil {
-		fmt.Println(err.Error())
+		fmt.Println("error readRequest", err.Error())
 		return Error("readRequest error " + err.Error())
 	} else {
 		if reply, ok := reply.([]interface{}); ok {
@@ -52,6 +52,7 @@ func (sess *session) Exec(proxy Proxy) error {
 	for {
 		if ok := sess.readRequest(); ok != nil {
 			sess.conn.writeBytes([]byte("-readRequestFailed"))
+			break
 		}
 		cmd := sess.conn.getResponse()
 		reply, err := proxy.do(cmd)
@@ -61,4 +62,6 @@ func (sess *session) Exec(proxy Proxy) error {
 		sess.conn.writeBytes(reply)
 		sess.conn.clear()
 	}
+	sess.conn.writeBytes([]byte("-readRequestFailed"))
+	return nil
 }

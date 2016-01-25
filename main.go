@@ -14,26 +14,26 @@ func main () {
 		fmt.Println(err.Error())
 	}
 
-	ch := make(chan proxy.Session, 10)
+	ch := make(chan net.Conn, 10)
 	//ch := make(chan int, 10)
 	go handleConnection(ch, server)
 
-	for id := 0; ; id += 1 {
+	for {
 		conn, err := ln.Accept()
 		if err != nil {
 			fmt.Println(err.Error())
 		} else {
 			fmt.Println(conn.RemoteAddr())
-			ch <- proxy.NewSession(conn)
+			ch <- conn
 		}
 	}
 }
 
-func handleConnection(sessList chan proxy.Session, server proxy.Proxy) {
-	for {
-		session := <- sessList
-		fmt.Println("handleConnection", session)
+func handleConnection(connList chan net.Conn, server proxy.Proxy) {
+	for conn := range connList {
 		go func () {
+			fmt.Println("handleConnection", conn)
+			session := proxy.NewSession(conn)
 			session.Exec(server)
 		}()
 	}
