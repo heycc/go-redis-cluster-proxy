@@ -10,26 +10,19 @@ import (
 	"time"
 )
 
-type Conn interface {
-	// execute a redis command
-	// Do(cmd string) (reply interface{}, err error)
-	// get buffered response
+type RedisConn interface {
 	getResponse() []byte
-	// write string command
 	writeCmd(string) error
 	// write raw bytes
 	writeBytes([]byte) error
 	// get response remote
 	readReply() (interface{}, error)
-	// get raw bytes of response
-	// readBytes() ([]byte, error)
-	// clear connection buffer info
 	clear() error
 }
 
 // NewConn returns a new connection.
-func NewConn(netConn net.Conn, readTimeout, writeTimeout int64) Conn {
-	return &conn{
+func NewConn(netConn net.Conn, readTimeout, writeTimeout int64) RedisConn {
+	return &redisConn{
 		conn:         netConn,
 		bw:           bufio.NewWriter(netConn),
 		br:           bufio.NewReader(netConn),
@@ -39,19 +32,16 @@ func NewConn(netConn net.Conn, readTimeout, writeTimeout int64) Conn {
 	}
 }
 
-type conn struct {
-	conn net.Conn
-	// Read
-	readTimeout time.Duration
-	br          *bufio.Reader
-	// Write
+type redisConn struct {
+	conn         net.Conn
+	readTimeout  time.Duration
+	br           *bufio.Reader
 	writeTimeout time.Duration
 	bw           *bufio.Writer
-
-	response []byte
+	response     []byte
 }
 
-func (c *conn) readLine() ([]byte, error) {
+func (c *redisConn) readLine() ([]byte, error) {
 	p, err := c.br.ReadSlice('\n')
 	if err == bufio.ErrBufferFull {
 		return nil, protocolError("response longer that buffer")
@@ -67,23 +57,23 @@ func (c *conn) readLine() ([]byte, error) {
 	return p[:i], nil
 }
 
-func (c *conn) readLen(len int64) ([]byte, error) {
+func (c *redisConn) readLen(len int64) ([]byte, error) {
 	p := make([]byte, len)
 	_, err := io.ReadFull(c.br, p)
 	c.bufferResponse(p)
 	return p, err
 }
 
-func (c *conn) bufferResponse(resp []byte) error {
+func (c *redisConn) bufferResponse(resp []byte) error {
 	c.response = append(c.response, resp...)
 	return nil
 }
 
-func (c *conn) getResponse() []byte {
+func (c *redisConn) getResponse() []byte {
 	return c.response
 }
 
-func (c *conn) clear() error {
+func (c *redisConn) clear() error {
 	c.response = nil
 	return nil
 }
@@ -96,10 +86,35 @@ func parseLen(p []byte) (int64, error) {
 }
 
 func parseInt(p []byte) (int64, error) {
-	return strconv.ParseInt(string(p), 10, 64)
+	if len(p) == 0 {
+		return 0, protocolError("malformed integer")
+	}
+
+	var negate bool
+	if p[0] == '-' {
+		negate = true
+		p = p[1:]
+		if len(p) == 0 {
+			return 0, protocolError("malformed integer")
+		}
+	}
+
+	var n int64
+	for _, b := range p {
+		n *= 10
+		if b < '0' || b > '9' {
+			return 0, protocolError("illegal bytes in length")
+		}
+		n += int64(b - '0')
+	}
+
+	if negate {
+		n = -n
+	}
+	return n, nil
 }
 
-func (c *conn) readReply() (interface{}, error) {
+func (c *redisConn) readReply() (interface{}, error) {
 	line, err := c.readLine()
 	if err != nil {
 		return nil, err
@@ -126,21 +141,21 @@ func (c *conn) readReply() (interface{}, error) {
 			if err != nil {
 				return nil, protocolError("MOVED error parse slot failed: " + err.Error())
 			}
-			return nil, &movedError{Slot: slot, Address: lineArr[2]}
+			return nil, movedError{Slot: slot, Address: lineArr[2]}
 		// ASK
 		case len(lineArr) == 3 && lineArr[0] == "-ASK":
 			slot, err := strconv.ParseInt(lineArr[1], 10, 64)
 			if err != nil {
 				return nil, protocolError("ASK error parse slot failed: " + err.Error())
 			}
-			return nil, &askError{Slot: slot, Address: lineArr[2]}
+			return nil, askError{Slot: slot, Address: lineArr[2]}
 		default:
-			return nil, Error(string(line[1:]))
+			return nil, protocolError(string(line[1:]))
 		}
 	case ':':
 		return parseInt(line[1:])
 	case '$':
-		n, err := parseLen(line[1:])
+		n, err := parseInt(line[1:])
 		if n < 0 || err != nil {
 			return nil, err
 		}
@@ -172,7 +187,7 @@ func (c *conn) readReply() (interface{}, error) {
 	return nil, protocolError("unexpected response line")
 }
 
-func (c *conn) writeCmd(cmd string) error {
+func (c *redisConn) writeCmd(cmd string) error {
 	cmdArr := regexp.MustCompile(" +").Split(cmd, 99)
 	cmdStr := fmt.Sprintf("*%d\r\n", len(cmdArr))
 	for _, val := range cmdArr {
@@ -182,7 +197,7 @@ func (c *conn) writeCmd(cmd string) error {
 	return c.writeBytes([]byte(cmdStr))
 }
 
-func (c *conn) writeBytes(cmd []byte) error {
+func (c *redisConn) writeBytes(cmd []byte) error {
 	c.bw.Write(cmd)
 	if err := c.bw.Flush(); err != nil {
 		return protocolError("flush error")
@@ -190,7 +205,7 @@ func (c *conn) writeBytes(cmd []byte) error {
 	return nil
 }
 
-func (c *conn) Do(cmd string) (interface{}, error) {
+func (c *redisConn) Do(cmd string) (interface{}, error) {
 	if c.writeTimeout != 0 {
 		c.conn.SetWriteDeadline(time.Now().Add(c.writeTimeout))
 	}
