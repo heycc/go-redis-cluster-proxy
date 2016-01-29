@@ -160,7 +160,7 @@ func (c *redisConn) readReply() (interface{}, error) {
 		}
 		return p, nil
 	case '*':
-		n, err := parseLen(line[1:])
+		n, err := parseInt(line[1:])
 		if n < 0 || err != nil {
 			return nil, err
 		}
@@ -202,9 +202,9 @@ func (c *redisConn) Do(cmd string) (interface{}, error) {
 	reply, err := c.readReply()
 	if err != nil {
 		switch err := err.(type) {
-		case *movedError:
+		case movedError:
 			return fmt.Sprintf("moved to %s", err.Address), nil
-		case *askError:
+		case askError:
 			return fmt.Sprintf("ask %s", err.Address), nil
 		default:
 			return nil, protocolError(fmt.Sprintf("%T", err))
