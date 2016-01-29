@@ -78,18 +78,10 @@ func (c *redisConn) clear() error {
 	return nil
 }
 
-func parseLen(p []byte) (int64, error) {
-	if len(p) == 0 {
-		return -1, protocolError("malformed length")
-	}
-	return strconv.ParseInt(string(p), 10, 64)
-}
-
 func parseInt(p []byte) (int64, error) {
 	if len(p) == 0 {
 		return 0, protocolError("malformed integer")
 	}
-
 	var negate bool
 	if p[0] == '-' {
 		negate = true
@@ -98,7 +90,6 @@ func parseInt(p []byte) (int64, error) {
 			return 0, protocolError("malformed integer")
 		}
 	}
-
 	var n int64
 	for _, b := range p {
 		n *= 10
@@ -107,7 +98,6 @@ func parseInt(p []byte) (int64, error) {
 		}
 		n += int64(b - '0')
 	}
-
 	if negate {
 		n = -n
 	}
@@ -168,7 +158,6 @@ func (c *redisConn) readReply() (interface{}, error) {
 		} else if len(line) != 0 {
 			return nil, protocolError("bad bulk string format")
 		}
-
 		return p, nil
 	case '*':
 		n, err := parseLen(line[1:])

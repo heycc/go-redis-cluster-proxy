@@ -179,7 +179,7 @@ func (p *proxy) slotDo(cmd []byte, id uint16) ([]byte, error) {
 			// MOVED error after MOVED error, this shouldn't happen
 			return nil, Error("Error! MOVED after MOVED")
 		default:
-			return resp, err
+			return resp, errVal
 		}
 	case askError:
 		// get ASK error for the first time, follow new address
