@@ -3,13 +3,13 @@ package proxy
 import (
 	"log"
 	"net"
-	"fmt"
+	// "fmt"
 	"strconv"
 )
 
 const (
 	SLOTSIZE   = 16384
-	BACKENSIZE = 2
+	BACKENSIZE = 32
 )
 
 type Proxy interface {
@@ -132,13 +132,9 @@ func (p *proxy) initBackend() {
 func (p *proxy) exec(cmd []byte, addr string) ([]byte, error) {
 	conn := <-p.backend[addr]
 	conn.writeBytes(cmd)
-	reply, err := conn.readReply()
+	_, err := conn.readReply()
 	resp := conn.getResponse()
-	fmt.Println("In exec", reply)
-	if reply, ok := reply.([]byte); ok {
-		fmt.Println("In exec assert", reply, resp)	
-	}	
-	conn.clear()
+	// conn.clear()
 	p.backend[addr] <- conn
 	return resp, err
 }
