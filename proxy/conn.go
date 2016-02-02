@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"bufio"
+	"bytes"
 	"fmt"
 	"io"
 	"net"
@@ -28,7 +29,7 @@ func NewConn(netConn net.Conn, readTimeout, writeTimeout int64) RedisConn {
 		br:           bufio.NewReader(netConn),
 		readTimeout:  time.Duration(readTimeout) * time.Millisecond,
 		writeTimeout: time.Duration(readTimeout) * time.Millisecond,
-		response:     make([]byte, 0),
+		response:     bytes.NewBuffer(nil),
 	}
 }
 
@@ -38,7 +39,7 @@ type redisConn struct {
 	br           *bufio.Reader
 	writeTimeout time.Duration
 	bw           *bufio.Writer
-	response     []byte
+	response     *bytes.Buffer
 }
 
 func (c *redisConn) readLine() ([]byte, error) {
@@ -65,16 +66,20 @@ func (c *redisConn) readLen(len int64) ([]byte, error) {
 }
 
 func (c *redisConn) bufferResponse(resp []byte) error {
-	c.response = append(c.response, resp...)
-	return nil
+	_, err := c.response.Write(resp)
+	return err
 }
 
 func (c *redisConn) getResponse() []byte {
-	return c.response
+	resp := make([]byte, c.response.Len())
+	_, err := c.response.Read(resp)
+	if err != nil { return nil }
+	return resp
+
 }
 
 func (c *redisConn) clear() error {
-	c.response = nil
+	// c.response.Truncate(0)
 	return nil
 }
 
@@ -123,7 +128,7 @@ func (c *redisConn) readReply() (interface{}, error) {
 			return string(line[1:]), nil
 		}
 	case '-':
-		lineArr := regexp.MustCompile(" +").Split(string(line), 4)
+		lineArr := splitRegex.Split(string(line), 4)
 		switch {
 		// MOVED 1180 127.0.0.1:7101
 		case len(lineArr) == 3 && lineArr[0] == "-MOVED":
@@ -177,7 +182,7 @@ func (c *redisConn) readReply() (interface{}, error) {
 }
 
 func (c *redisConn) writeCmd(cmd string) error {
-	cmdArr := regexp.MustCompile(" +").Split(cmd, 99)
+	cmdArr := splitRegex.Split(cmd, 99)
 	cmdStr := fmt.Sprintf("*%d\r\n", len(cmdArr))
 	for _, val := range cmdArr {
 		cmdStr += fmt.Sprintf("$%d\r\n", len(val))
@@ -217,4 +222,5 @@ func (c *redisConn) Do(cmd string) (interface{}, error) {
 var (
 	okReply   interface{} = "OK"
 	pongReply interface{} = "PONG"
+	splitRegex *regexp.Regexp = regexp.MustCompile(" +")
 )

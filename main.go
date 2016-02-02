@@ -31,7 +31,6 @@ func main () {
 				// session.Exec(server)
 			}(conn)
 		}
-		
 	}()
 
 	for {

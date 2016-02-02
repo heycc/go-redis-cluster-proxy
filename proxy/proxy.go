@@ -3,6 +3,7 @@ package proxy
 import (
 	"log"
 	"net"
+	"fmt"
 	"strconv"
 )
 
@@ -131,8 +132,12 @@ func (p *proxy) initBackend() {
 func (p *proxy) exec(cmd []byte, addr string) ([]byte, error) {
 	conn := <-p.backend[addr]
 	conn.writeBytes(cmd)
-	_, err := conn.readReply()
+	reply, err := conn.readReply()
 	resp := conn.getResponse()
+	fmt.Println("In exec", reply)
+	if reply, ok := reply.([]byte); ok {
+		fmt.Println("In exec assert", reply, resp)	
+	}	
 	conn.clear()
 	p.backend[addr] <- conn
 	return resp, err
