@@ -7,8 +7,8 @@ import (
 	"./proxy"
 )
 func main () {
-	runtime.GOMAXPROCS(4)
-	addr := "127.0.0.1:7102"
+	runtime.GOMAXPROCS(12)
+	addr := "127.0.0.1:7101"
     server := proxy.NewProxy(addr)
 
 	ln, err := net.Listen("tcp", ":7011")

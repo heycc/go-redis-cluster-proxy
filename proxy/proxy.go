@@ -171,6 +171,7 @@ func (p *proxy) slotDo(cmd []byte, id uint16) ([]byte, error) {
 	switch errVal := err.(type) {
 	case movedError:
 		// get MOVED error for the first time, follow new address
+		log.Println("moved")
 		resp, err := p.exec(cmd, errVal.Address)
 		switch errVal := err.(type) {
 		case askError:
@@ -184,6 +185,7 @@ func (p *proxy) slotDo(cmd []byte, id uint16) ([]byte, error) {
 		}
 	case askError:
 		// get ASK error for the first time, follow new address
+		log.Println("ask")
 		return p.execWithAsk(cmd, errVal.Address)
 	default:
 		return resp, errVal

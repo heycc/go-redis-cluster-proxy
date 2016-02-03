@@ -33,25 +33,23 @@ func (sess *session) readRequest() (uint16, error) {
 		return 0, Error("readRequest error " + err.Error())
 	} else {
 		reqBody, _ := reply.([]interface{})
-		key, _ := reqBody[1].(string)
-		return KeySlot([]byte(key)), nil
+		if key, ok := reqBody[1].([]uint8); ok {
+			return KeySlot([]byte(key)), nil
+		} else {
+			return 0, nil
+		}
 	}
 }
 
 func (sess *session) Work(proxy Proxy) error {
-	// fmt.Println("33", proxy)
-	// proxy.GetAddr()
-	// fmt.Println(sess.cliConn.conn.RemoteAddr(), "Exec")
 	for {
 		slot, err := sess.readRequest()
 		cmd := sess.cliConn.getResponse()
 
 		if err != nil {
-			// fmt.Println(sess.cliConn.conn.RemoteAddr(), "error", err.Error())
 			return nil
 		}
 
-		// fmt.Println(sess.cliConn.conn.RemoteAddr(), "requst", cmd)
 		reply, err := proxy.slotDo(cmd, slot)
 		if err != nil {
 			fmt.Println("do err", err.Error())
