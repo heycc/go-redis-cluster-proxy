@@ -4,10 +4,14 @@ import (
 	"fmt"
 	"net"
 	"runtime"
+	// _ "net/http/pprof"
+	// "net/http"
 	"./proxy"
 )
 func main () {
-	runtime.GOMAXPROCS(12)
+	runtime.GOMAXPROCS(4)
+	// http.ListenAndServe(":8080", http.DefaultServeMux)
+
 	addr := "127.0.0.1:7101"
     server := proxy.NewProxy(addr)
 

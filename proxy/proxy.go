@@ -9,7 +9,7 @@ import (
 
 const (
 	SLOTSIZE   = 16384
-	BACKENSIZE = 32
+	BACKENSIZE = 4
 )
 
 type Proxy interface {
@@ -134,7 +134,7 @@ func (p *proxy) exec(cmd []byte, addr string) ([]byte, error) {
 	conn.writeBytes(cmd)
 	_, err := conn.readReply()
 	resp := conn.getResponse()
-	// conn.clear()
+	conn.clear()
 	p.backend[addr] <- conn
 	return resp, err
 }

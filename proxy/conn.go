@@ -75,11 +75,10 @@ func (c *redisConn) getResponse() []byte {
 	_, err := c.response.Read(resp)
 	if err != nil { return nil }
 	return resp
-
 }
 
 func (c *redisConn) clear() error {
-	// c.response.Truncate(0)
+	c.response.Truncate(0)
 	return nil
 }
 
