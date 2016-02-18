@@ -1,13 +1,16 @@
 package proxy
 
 import (
+	"log"
 	"fmt"
 	"net"
 	"time"
 )
 
 type Session interface {
+	readRequest() (uint16, error)
 	Work(Proxy) error
+	close()
 }
 
 type session struct {
@@ -30,13 +33,23 @@ func NewSession(net net.Conn) Session {
 func (sess *session) readRequest() (uint16, error) {
 	reply, err := sess.cliConn.readReply()
 	if err != nil {
-		return 0, Error("readRequest error " + err.Error())
+		return 0, protocolError("readRequest error " + err.Error())
 	} else {
-		reqBody, _ := reply.([]interface{})
+		reqBody, ok := reply.([]interface{})
+		if !ok || len(reqBody) == 0 {
+			return 0, protocolError("Bad request sequence")
+		}
+		cmd, _ := reqBody[0].([]uint8)
+		if UnsupportedCmd(cmd) {
+			return 0, protocolError("UnsupportedCmd " + cmd)
+		}
+		if len(reqBody) < 2 {
+			return 0, protocolError("Bad length of cmd " + cmd)
+		}
 		if key, ok := reqBody[1].([]uint8); ok {
 			return KeySlot([]byte(key)), nil
 		} else {
-			return 0, nil
+			return 0, protocolError("Bad key type " + key)
 		}
 	}
 }
@@ -47,8 +60,11 @@ func (sess *session) Work(proxy Proxy) error {
 		cmd := sess.cliConn.getResponse()
 
 		if err != nil {
+			sess.close()
 			return nil
 		}
+
+		// handle PING & QUIT
 
 		reply, err := proxy.slotDo(cmd, slot)
 		if err != nil {
@@ -56,5 +72,20 @@ func (sess *session) Work(proxy Proxy) error {
 		}
 		sess.cliConn.writeBytes(reply)
 		sess.cliConn.clear()
+		sess.ops += 1
 	}
+}
+
+func (sess *session) close() {
+	log.Println("connection closed.",
+		"create at:",
+		sess.ts,
+		"closed at:",
+		time.Now(),
+		"ops",
+		sess.ops,
+		"total time(microsecond)",
+		sess.microsecond,
+		"addr",
+		sess.cliConn.conn.RemoteAddr())
 }

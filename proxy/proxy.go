@@ -145,7 +145,7 @@ func (p *proxy) execWithAsk(cmd []byte, addr string) ([]byte, error) {
 	if _, err := conn.readReply(); err != nil {
 		conn.clear()
 		p.backend[addr] <- conn
-		return nil, Error("ASKING failed " + err.Error())
+		return nil, protocolError("ASKING failed " + err.Error())
 	}
 	conn.clear()
 	conn.writeBytes(cmd)
@@ -162,7 +162,7 @@ func (p *proxy) do(cmd []byte) ([]byte, error) {
 
 func (p *proxy) slotDo(cmd []byte, id uint16) ([]byte, error) {
 	if !(id >= 0 && id < SLOTSIZE) {
-		return nil, Error("slot id out of range: " + string(id))
+		return nil, protocolError("slot id out of range: " + string(id))
 	}
 	resp, err := p.exec(cmd, p.slotMap[id])
 	if err == nil {
@@ -179,7 +179,7 @@ func (p *proxy) slotDo(cmd []byte, id uint16) ([]byte, error) {
 			return p.execWithAsk(cmd, errVal.Address)
 		case movedError:
 			// MOVED error after MOVED error, this shouldn't happen
-			return nil, Error("Error! MOVED after MOVED")
+			return nil, protocolError("Error! MOVED after MOVED")
 		default:
 			return resp, errVal
 		}

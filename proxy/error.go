@@ -4,11 +4,11 @@ import (
 	"fmt"
 )
 
-type Error string
+// type Error string
 
-func (err Error) Error() string {
-	return string(err)
-}
+// func (err Error) Error() string {
+// 	return string(err)
+// }
 
 type protocolError string
 
