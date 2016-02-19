@@ -2,14 +2,13 @@ package proxy
 
 import (
 	"log"
-	"fmt"
 	"net"
 	"time"
+	"strings"
 )
 
 type Session interface {
-	readRequest() (uint16, error)
-	Work(Proxy) error
+	Loop(Proxy) error
 	close()
 }
 
@@ -18,6 +17,7 @@ type session struct {
 	ops         uint64
 	microsecond uint64
 	cliConn     RedisConn
+	closed		bool
 }
 
 func NewSession(net net.Conn) Session {
@@ -27,65 +27,92 @@ func NewSession(net net.Conn) Session {
 		ops:         0,
 		microsecond: 0,
 		cliConn:     conn,
+		closed:		 false,
 	}
 }
 
-func (sess *session) readRequest() (uint16, error) {
-	reply, err := sess.cliConn.readReply()
-	if err != nil {
-		return 0, protocolError("readRequest error " + err.Error())
-	} else {
-		reqBody, ok := reply.([]interface{})
-		if !ok || len(reqBody) == 0 {
-			return 0, protocolError("Bad request sequence")
-		}
-		cmd, _ := reqBody[0].([]uint8)
-		if UnsupportedCmd(cmd) {
-			return 0, protocolError("UnsupportedCmd " + cmd)
-		}
-		if len(reqBody) < 2 {
-			return 0, protocolError("Bad length of cmd " + cmd)
-		}
-		if key, ok := reqBody[1].([]uint8); ok {
-			return KeySlot([]byte(key)), nil
-		} else {
-			return 0, protocolError("Bad key type " + key)
-		}
-	}
-}
-
-func (sess *session) Work(proxy Proxy) error {
+func (sess *session) Loop(proxy Proxy) error {
 	for {
-		slot, err := sess.readRequest()
-		cmd := sess.cliConn.getResponse()
+		begin_time := time.Now().UnixNano()
+
+		req_obj, err := sess.readReq()
+		if err != nil {
+			sess.close()
+			return err
+		}
+
+		rlt, err := sess.exec(proxy, req_obj)
 
 		if err != nil {
+			sess.cliConn.writeBytes([]byte("-" + err.Error() + "\r\n"))
+		}
+		if sess.closed {
 			sess.close()
 			return nil
 		}
 
-		// handle PING & QUIT
-
-		reply, err := proxy.slotDo(cmd, slot)
-		if err != nil {
-			fmt.Println("do err", err.Error())
-		}
-		sess.cliConn.writeBytes(reply)
-		sess.cliConn.clear()
+		sess.cliConn.writeBytes(rlt)
+		
+		end_time := time.Now().UnixNano()
 		sess.ops += 1
+		sess.microsecond += uint64((end_time - begin_time) / (1000))
 	}
 }
 
+func (sess *session) readReq() (interface{}, error) {
+	sess.cliConn.clear()
+	return sess.cliConn.readReply()
+}
+
+func (sess *session) exec(proxy Proxy, req_obj interface{}) ([]byte, error) {
+	req_body, ok := req_obj.([]interface{})
+	if !ok || len(req_body) == 0 {
+		return nil, protocolError("bad request length")
+	}
+	req_cmd := string(req_body[0].([]uint8))
+
+	// handle unsupported command
+	if UnsupportedCmd(strings.ToUpper(strings.TrimSpace(req_cmd))) {
+		return nil, protocolError("unsupported cmd " + req_cmd)
+	}
+	// handle QUIT
+	if strings.ToUpper(req_cmd) == "QUIT" {
+		sess.closed = true
+		return nil, protocolError("client issue QUIT")
+	}
+	// handle PING
+	if strings.ToUpper(req_cmd) == "PING" {
+		return []byte("+PONG\r\n"), nil
+	}
+
+	if len(req_body) < 2 {
+		return nil, protocolError("only one argument given " + req_cmd)
+	}
+
+	req_key, ok := req_body[1].([]uint8)
+	if !ok {
+		return nil, protocolError("bad key type ")
+	}
+	req_slot := KeySlot([]byte(req_key))
+	req_bytes := sess.cliConn.getResponse()
+	return proxy.slotDo(req_bytes, req_slot)
+}
+
 func (sess *session) close() {
-	log.Println("connection closed.",
+	sess.cliConn.close()
+	log.Println("connection closed. ",
 		"create at:",
 		sess.ts,
-		"closed at:",
+		", closed at:",
 		time.Now(),
-		"ops",
+		", ops:",
 		sess.ops,
-		"total time(microsecond)",
+		", time(µs):",
 		sess.microsecond,
-		"addr",
-		sess.cliConn.conn.RemoteAddr())
+		", addr:",
+		sess.remoteAddr())
+}
+
+func (sess *session) remoteAddr() string {
+	return sess.cliConn.remoteAddr()
 }

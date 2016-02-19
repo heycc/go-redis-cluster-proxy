@@ -18,7 +18,9 @@ type RedisConn interface {
 	writeBytes([]byte) error
 	// get response remote
 	readReply() (interface{}, error)
+	remoteAddr() string
 	clear() error
+	close() error
 }
 
 // NewConn returns a new connection.
@@ -73,7 +75,9 @@ func (c *redisConn) bufferResponse(resp []byte) error {
 func (c *redisConn) getResponse() []byte {
 	resp := make([]byte, c.response.Len())
 	_, err := c.response.Read(resp)
-	if err != nil { return nil }
+	if err != nil {
+		return nil
+	}
 	return resp
 }
 
@@ -218,8 +222,16 @@ func (c *redisConn) Do(cmd string) (interface{}, error) {
 	}
 }
 
+func (c *redisConn) remoteAddr() string {
+	return c.conn.RemoteAddr().String()
+}
+
+func (c *redisConn) close() error {
+	return c.conn.Close()
+}
+
 var (
-	okReply   interface{} = "OK"
-	pongReply interface{} = "PONG"
+	okReply    interface{}    = "OK"
+	pongReply  interface{}    = "PONG"
 	splitRegex *regexp.Regexp = regexp.MustCompile(" +")
 )

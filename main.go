@@ -31,8 +31,7 @@ func main () {
 			go func(conn net.Conn) {
 				// fmt.Println("22", server)
 				// fmt.Println("go in loop", conn.RemoteAddr())
-				proxy.NewSession(conn).Work(server)
-				// session.Exec(server)
+				proxy.NewSession(conn).Loop(server)
 			}(conn)
 		}
 	}()
