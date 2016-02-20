@@ -9,7 +9,7 @@ import (
 
 type Session interface {
 	Loop(Proxy) error
-	close()
+	close(error)
 }
 
 type session struct {
@@ -32,24 +32,26 @@ func NewSession(net net.Conn) Session {
 }
 
 func (sess *session) Loop(proxy Proxy) error {
+	log.Println("new connection:", sess.remoteAddr())
 	for {
 		req_obj, err := sess.readReq()
 		if err != nil {
-			sess.close()
+			sess.close(err)
 			return err
 		}
 
 		begin_time := time.Now().UnixNano()
 
 		rlt, err := sess.exec(proxy, req_obj)
-		if err != nil {
-			sess.cliConn.writeBytes([]byte("-" + err.Error() + "\r\n"))
-		}
 		if sess.closed {
-			sess.close()
+			sess.close(err)
 			return nil
 		}
-		sess.cliConn.writeBytes(rlt)
+		if err != nil {
+			sess.cliConn.writeBytes([]byte("-" + err.Error() + "\r\n"))
+		} else {
+			sess.cliConn.writeBytes(rlt)
+		}
 		
 		end_time := time.Now().UnixNano()
 		sess.ops += 1
@@ -87,16 +89,17 @@ func (sess *session) exec(proxy Proxy, req_obj interface{}) ([]byte, error) {
 	if !ok {
 		return nil, protocolError("bad key type")
 	}
-	
+
 	req_slot := KeySlot([]byte(req_key))
 	req_bytes := sess.cliConn.getResponse()
 	return proxy.slotDo(req_bytes, req_slot)
 }
 
-func (sess *session) close() {
+func (sess *session) close(err error) {
 	sess.cliConn.close()
-	log.Println("connection closed. ",
-		"create at:",
+	log.Println("connection closed:",
+		err.Error(),
+		", create at:",
 		sess.ts,
 		", closed at:",
 		time.Now(),

@@ -1,6 +1,6 @@
 package proxy
 
-var cmd_deny []string = []string{
+var cmd_deny = []string{
 	"CLUSTER", "READONLY", "READWRITE",
 	"AUTH", "ECHO", "SELECT",
 	"PFADD", "PFCOUNT", "PFMERGE",
