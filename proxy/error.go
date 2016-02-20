@@ -4,12 +4,6 @@ import (
 	"fmt"
 )
 
-// type Error string
-
-// func (err Error) Error() string {
-// 	return string(err)
-// }
-
 type protocolError string
 
 func (pe protocolError) Error() string {

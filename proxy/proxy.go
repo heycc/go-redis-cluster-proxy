@@ -108,7 +108,7 @@ func (p *proxy) initSlotMap() {
 			p.addrList = append(p.addrList, tmpAddr)
 		}
 	}
-	log.Println("cluster nodes: ", p.addrList)
+	log.Println("cluster nodes:", p.addrList)
 }
 
 // initBackend init connection to all redis nodes
@@ -116,14 +116,13 @@ func (p *proxy) initBackend() {
 	p.backend = make(map[string](chan RedisConn), len(p.addrList))
 	for _, addr := range p.addrList {
 		p.backend[addr] = make(chan RedisConn, p.chanSize)
-		log.Println("init backend connection", addr, p.chanSize)
+		log.Println("init backend connection to", addr, ", pool size", p.chanSize)
 		for i := 0; i < p.chanSize; i++ {
 			conn, err := net.Dial("tcp", addr)
 			if err != nil {
 				log.Fatal("failed to dail node " + addr + " " + err.Error())
 			}
 			c := NewConn(conn, 10, 10)
-			log.Println("initBacken", c)
 			p.backend[addr] <- c
 		}
 	}
@@ -170,8 +169,7 @@ func (p *proxy) slotDo(cmd []byte, id uint16) ([]byte, error) {
 	}
 	switch errVal := err.(type) {
 	case movedError:
-		// get MOVED error for the first time, follow new address
-		log.Println("moved")
+		// get MOVED error for the first time, follow new address, update slot mapping
 		resp, err := p.exec(cmd, errVal.Address)
 		switch errVal := err.(type) {
 		case askError:
@@ -185,7 +183,6 @@ func (p *proxy) slotDo(cmd []byte, id uint16) ([]byte, error) {
 		}
 	case askError:
 		// get ASK error for the first time, follow new address
-		log.Println("ask")
 		return p.execWithAsk(cmd, errVal.Address)
 	default:
 		return resp, errVal

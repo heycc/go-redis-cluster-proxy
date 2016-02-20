@@ -33,16 +33,15 @@ func NewSession(net net.Conn) Session {
 
 func (sess *session) Loop(proxy Proxy) error {
 	for {
-		begin_time := time.Now().UnixNano()
-
 		req_obj, err := sess.readReq()
 		if err != nil {
 			sess.close()
 			return err
 		}
 
-		rlt, err := sess.exec(proxy, req_obj)
+		begin_time := time.Now().UnixNano()
 
+		rlt, err := sess.exec(proxy, req_obj)
 		if err != nil {
 			sess.cliConn.writeBytes([]byte("-" + err.Error() + "\r\n"))
 		}
@@ -50,7 +49,6 @@ func (sess *session) Loop(proxy Proxy) error {
 			sess.close()
 			return nil
 		}
-
 		sess.cliConn.writeBytes(rlt)
 		
 		end_time := time.Now().UnixNano()
@@ -72,27 +70,24 @@ func (sess *session) exec(proxy Proxy, req_obj interface{}) ([]byte, error) {
 	req_cmd := string(req_body[0].([]uint8))
 
 	// handle unsupported command
-	if UnsupportedCmd(strings.ToUpper(strings.TrimSpace(req_cmd))) {
+	switch {
+	case UnsupportedCmd(strings.ToUpper(strings.TrimSpace(req_cmd))):
 		return nil, protocolError("unsupported cmd " + req_cmd)
-	}
-	// handle QUIT
-	if strings.ToUpper(req_cmd) == "QUIT" {
+	case strings.ToUpper(req_cmd) == "QUIT":
 		sess.closed = true
 		return nil, protocolError("client issue QUIT")
-	}
-	// handle PING
-	if strings.ToUpper(req_cmd) == "PING" {
+	case strings.ToUpper(req_cmd) == "PING":
 		return []byte("+PONG\r\n"), nil
 	}
 
 	if len(req_body) < 2 {
 		return nil, protocolError("only one argument given " + req_cmd)
 	}
-
 	req_key, ok := req_body[1].([]uint8)
 	if !ok {
-		return nil, protocolError("bad key type ")
+		return nil, protocolError("bad key type")
 	}
+	
 	req_slot := KeySlot([]byte(req_key))
 	req_bytes := sess.cliConn.getResponse()
 	return proxy.slotDo(req_bytes, req_slot)
