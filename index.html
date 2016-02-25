@@ -31,10 +31,19 @@
         <hr>
 
         <section id="main_content">
-          <h3>
-<a id="redis-cluster-solutions" class="anchor" href="#redis-cluster-solutions" aria-hidden="true"><span aria-hidden="true" class="octicon octicon-link"></span></a>Redis Cluster Solutions</h3>
-
-<p>This project is simplely a practice of study of golang.</p>
+          <h3><a id="redis-cluster-solutions" class="anchor" href="#redis-cluster-solutions" aria-hidden="true">
+            <span aria-hidden="true" class="octicon octicon-link"></span></a>
+            Redis Cluster Solutions
+          </h3>
+          <p>Redis Cluster 是 Redis 官方的集群解决方案，解决了单机 Redis 的QPS、内存和带宽容量的限制。理论上 Redis Cluster 支持最多16384个后端 Redis master 节点，slave 节点数不受限制。如果后端 Redis 节点实例可以部署在独立的主机上，独立配置最大内存。Redis Cluster 还是无 proxy 设计，client 与后端 Redis 节点直接通信，不经过转发，避免 proxy 层带来的网络延迟。</p>
+          <h3><a id="redis-cluster-feature" class="anchor" href="#redis-cluster-feature" aria-hidden="true">
+            <span aria-hidden="true" class="octicon octicon-link"></span></a>
+            Redis Cluster 的特性
+          </h3>
+          <h4>分片</h4>
+          <p>Redis Cluster 按 key 做 hash 分片（slot）。计算规则为 <code>HASH_SLOT = CRC16(key) mod 16384</code>。每个 key 都映射到一个 HASH_SLOT 里。总计16384个 HASH_SLOT。Cluster 后端的每个 Redis 存储一部分 HASH_SLOT，存储规则是可配置的。例如后端有16个 Redis 实例，每个 Redis 实例存1024个 HASH_SLOT，1024*16 = 16384。每个 Redis 实例配置最大内存为64G，那么整个 Redis Cluster 的容量就是 64G*16 = 1024G。这个容量远超常见服务器的最大内存。</p>
+          <h4>高可用</h4>
+          <p>Redis Cluster 可以配置多个 Redis 作 slave。在有 master 不可用时，自动提升故障 master 的一个 slave 为 master，并把其他 slave 配置为新 master 的 slave。还能自动调整各 master 的 slave 的数目，确保每个 master 都有一个slave。如果 Redis Cluster 配置了 n 个 master，为了保证任意 master 都有 slave 可切换，则需要 n 个 slave。为了满足任意一个 Redis 实例（master 或 slave）故障后，所有 master 都有至少一个 slave，确保 master 都没有单点故障，则需要额外 1 个 Redis 实例。更通用的，如果配置了 N 个 master，且要求 x 个 redis 故障后 Redis Cluster 也没有单点隐患，则需要总计 2*N+x 个 Redis 实例。</p>
 
         </section>
 
