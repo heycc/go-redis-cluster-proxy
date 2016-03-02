@@ -44,7 +44,31 @@
           <p>Redis Cluster 按 key 做 hash 分片（slot）。计算规则为 <code>HASH_SLOT = CRC16(key) mod 16384</code>。每个 key 都映射到一个 HASH_SLOT 里。总计16384个 HASH_SLOT。Cluster 后端的每个 Redis 存储一部分 HASH_SLOT，存储规则是可配置的。例如后端有16个 Redis 实例，每个 Redis 实例存1024个 HASH_SLOT，1024*16 = 16384。每个 Redis 实例配置最大内存为64G，那么整个 Redis Cluster 的容量就是 64G*16 = 1024G。这个容量远超常见服务器的最大内存。</p>
           <h4>高可用</h4>
           <p>Redis Cluster 可以配置多个 Redis 作 slave。在有 master 不可用时，自动提升故障 master 的一个 slave 为 master，并把其他 slave 配置为新 master 的 slave。还能自动调整各 master 的 slave 的数目，确保每个 master 都有一个slave。如果 Redis Cluster 配置了 n 个 master，为了保证任意 master 都有 slave 可切换，则需要 n 个 slave。为了满足任意一个 Redis 实例（master 或 slave）故障后，所有 master 都有至少一个 slave，确保 master 都没有单点故障，则需要额外 1 个 Redis 实例。更通用的，如果配置了 N 个 master，且要求 x 个 redis 故障后 Redis Cluster 也没有单点隐患，则需要总计 2*N+x 个 Redis 实例。</p>
-
+          <h3><a id="key-route" class="anchor" href="#key-route" aria-hidden="true">
+            <span aria-hidden="true" class="octicon octicon-link"></span></a>
+            Key Redirection
+          </h3>
+          <h4>MOVED redirection</h4>
+          <p>Cluster 里的 key，不支持内部路由（forwarding），而是 redirect 机制。当 client 访问一个 node 时，如果这个 key 存储在这个 node 上，则返回结果；如果不存储在这个 node 上，则返回一个 <code>-MOVED</code> redirection 错误，内容包括这个 key 存储在哪个 node 上。如 <code>127.0.0.1:6371> get aa</code> 返回 <code>(error) MOVED 1180 127.0.0.1:6372</code>，指 <code>aa</code> 这个 key 对应的 slot id 为 <code>1180</code>，而这个 slot 存储在节点 <code>127.0.0.1:6372</code>。此时要求 client 连接 <code>127.0.0.1:6372</code>，才能访问到 key <code>aa</code>。</p>
+          <h4>ASK redirection</h4>
+          <p>迁移 key 时，slot 会有迁移状态。比如 slot 1 从 node A 迁移到 node B，则在 node A 上 slot 1 是 <code>migrating</code> 状态，同时在 node B 上 slot 1 是 <code>importing</code> 状态。当来自 client 请求的 key 属于 slot 1 时：
+          <ul style="padding-left:25px;">
+            <li>如果 node A (migrating) 收到请求，则判断：如果 key 存在于自己 node 里，则返回 client；如果 key 不存在于自己 node 里，则返回 client 一个 <code>-ASK</code> redirection 错误。</li>
+            <li>如果 node B (importing) 收到请求，则判断：如果此请求的上一个请求是 ASKING 指令，则处理此次请求；否则，返回 client 一个 <code>-MOVED</code> redirection 错误。</li>
+          </ul>
+          </p>
+          <h3><a id="cluster-client" class="anchor" href="#cluster-client" aria-hidden="true">
+            <span aria-hidden="true" class="octicon octicon-link"></span></a>
+            Cluster Client
+          </h3>
+          <p>要想使用 Redis Cluster，client 端要支持 key redirection。具体就是当 cluster 返回一个 <code>-MOVED</code> 或 <code>-ASK</code> 时要能识别 redirection，并连接指定的 node。如果是 <code>-ASK</code> 还需要在给新 node 发送指令前，先发送 <code>ASKING</code> 指令。</p>
+          <p>目前已知 java 的 jedis 支持 Redis Cluster。其他语言需要等待官方支持。</p>
+          <h3><a id="proxy-solution" class="anchor" href="#proxy-solution" aria-hidden="true">
+            <span aria-hidden="true" class="octicon octicon-link"></span></a>
+            Proxy Solution
+          </h3>
+          <p>本项目即实现了一个 redis proxy，支持 Redis Cluster 的 key redirection。而实现原理也很简单：解析 client 的指令，计算 key 的 slot id，内部维护一份 slot id 到 node 的映射，定向 forward 到对应的 redis node。解析返回结果，如果结果是 <code>-MOVED</code> 或 <code>-ASK</code> redirection 错误，则再次 forward 到新的 redis node，（如果是<code>-ASK</code>，需要先发送 <code>ASKING</code> 指令）；如果结果是别的错误或者是正常结果，则 forward 给 client。</p>
+          
         </section>
 
         <footer>
