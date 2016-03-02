@@ -1,6 +1,7 @@
 # go-redis-cluster-proxy
 redis-cluster proxy build on go
 
+The github project [site](http://blog.heycc.net/go-redis-cluster-proxy)
 
 ## TODO
 1. When slot migrated, update slot mapping
