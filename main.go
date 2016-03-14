@@ -1,16 +1,17 @@
 package main
 
 import (
+	"./proxy"
 	"fmt"
 	"net"
 	"runtime"
-	"./proxy"
 )
-func main () {
+
+func main() {
 	runtime.GOMAXPROCS(4)
 
 	addr := "127.0.0.1:7101"
-    server := proxy.NewProxy(addr)
+	server := proxy.NewProxy(addr)
 
 	ln, err := net.Listen("tcp", ":7011")
 	if err != nil {

@@ -3,8 +3,8 @@ package proxy
 import (
 	"log"
 	"net"
-	"time"
 	"strings"
+	"time"
 )
 
 type Session interface {
@@ -17,7 +17,7 @@ type session struct {
 	ops         uint64
 	microsecond uint64
 	cliConn     RedisConn
-	closed		bool
+	closed      bool
 }
 
 func NewSession(net net.Conn) Session {
@@ -27,7 +27,7 @@ func NewSession(net net.Conn) Session {
 		ops:         0,
 		microsecond: 0,
 		cliConn:     conn,
-		closed:		 false,
+		closed:      false,
 	}
 }
 
@@ -52,7 +52,7 @@ func (sess *session) Loop(proxy Proxy) error {
 		} else {
 			sess.cliConn.writeBytes(rlt)
 		}
-		
+
 		end_time := time.Now().UnixNano()
 		sess.ops += 1
 		sess.microsecond += uint64((end_time - begin_time) / (1000))

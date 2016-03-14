@@ -3,13 +3,8 @@ package proxy
 import (
 	"log"
 	"net"
-	// "fmt"
+	"strings"
 	"strconv"
-)
-
-const (
-	SLOTSIZE   = 16384
-	BACKENSIZE = 4
 )
 
 type Proxy interface {
@@ -57,8 +52,23 @@ func (p *proxy) Close() error {
 
 // checkState check that cluster is available
 func (p *proxy) checkState() error {
-	// TODO
-	return nil
+	p.adminConn.writeCmd("CLUSTER INFO")
+	reply, err := p.adminConn.readReply()
+	if err != nil {
+		return err
+	}
+	reply_body := reply.([]uint8)
+	for _, line := range strings.Split(string(reply_body), "\r\n") {
+		line_arr := strings.Split(line, ":")
+		if line_arr[0] == "cluster_state" {
+			if line_arr[1] != "ok" {
+				return protocolError(string(reply_body))
+			} else {
+				return nil
+			}
+		}
+	}
+	return protocolError("checkState should never run up to here")
 }
 
 func (p *proxy) init() {
@@ -93,7 +103,10 @@ func (p *proxy) initSlotMap() {
 		tmpAddr := slot_addr + ":" + strconv.FormatInt(slot_port, 10)
 
 		for i := slot_from; i <= slot_to; i++ {
+			// Lock
+			// NewConn chan
 			p.slotMap[i] = tmpAddr
+			// Unlock
 		}
 
 		// add node address to proxy.addrList
@@ -163,7 +176,10 @@ func (p *proxy) slotDo(cmd []byte, id uint16) ([]byte, error) {
 	if !(id >= 0 && id < SLOTSIZE) {
 		return nil, protocolError("slot id out of range: " + string(id))
 	}
-	resp, err := p.exec(cmd, p.slotMap[id])
+	// RLock
+	addr := p.slotMap[id]
+	// RUnlock
+	resp, err := p.exec(cmd, addr)
 	if err == nil {
 		return resp, nil
 	}
@@ -188,3 +204,8 @@ func (p *proxy) slotDo(cmd []byte, id uint16) ([]byte, error) {
 		return resp, errVal
 	}
 }
+
+const (
+	SLOTSIZE   = 16384
+	BACKENSIZE = 4
+)
