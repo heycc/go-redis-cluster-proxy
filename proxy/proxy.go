@@ -3,8 +3,9 @@ package proxy
 import (
 	"log"
 	"net"
-	"strings"
 	"strconv"
+	"strings"
+	"sync"
 )
 
 type Proxy interface {
@@ -21,6 +22,7 @@ type proxy struct {
 	chanSize   int
 	backend    map[string](chan RedisConn)
 	adminConn  RedisConn
+	mutex      sync.RWMutex
 }
 
 func NewProxy(address string) Proxy {
@@ -35,6 +37,7 @@ func NewProxy(address string) Proxy {
 		chanSize:   BACKENSIZE,
 		backend:    nil,
 		adminConn:  NewConn(net, 10, 10),
+		mutex:      sync.RWMutex{},
 	}
 	p.init()
 	return p
@@ -74,13 +77,14 @@ func (p *proxy) checkState() error {
 func (p *proxy) init() {
 	p.slotMap = make([]string, p.totalSlots)
 	p.addrList = make([]string, 0)
+	p.backend = make(map[string](chan RedisConn))
 	// TODO: check redis cluster is READY!
 	err := p.checkState()
 	if err != nil {
 		log.Fatal(err)
 	}
 	p.initSlotMap()
-	p.initBackend()
+	//p.initBackend()
 }
 
 // initSlotMap get nodes list and slot distribution
@@ -102,31 +106,44 @@ func (p *proxy) initSlotMap() {
 		slot_port := addr_tmp[1].(int64)
 		tmpAddr := slot_addr + ":" + strconv.FormatInt(slot_port, 10)
 
-		for i := slot_from; i <= slot_to; i++ {
-			// Lock
-			// NewConn chan
-			p.slotMap[i] = tmpAddr
-			// Unlock
-		}
+		p.initBackendByAddr(tmpAddr)
 
-		// add node address to proxy.addrList
-		isNew := true
-		for _, addr := range p.addrList {
-			if addr == tmpAddr {
-				isNew = false
-				break
-			}
+		p.mutex.Lock()
+		for i := slot_from; i <= slot_to; i++ {
+			p.slotMap[i] = tmpAddr
 		}
-		if isNew {
-			p.addrList = append(p.addrList, tmpAddr)
-		}
+		p.mutex.Unlock()
 	}
 	log.Println("cluster nodes:", p.addrList)
 }
 
+func (p *proxy) initBackendByAddr(addr string) {
+	// add node address to proxy.addrList
+	isNew := true
+	for _, address := range p.addrList {
+		if addr == address {
+			isNew = false
+			break
+		}
+	}
+	if isNew {
+		p.addrList = append(p.addrList, addr)
+		p.backend[addr] = make(chan RedisConn, p.chanSize)
+		log.Println("init backend connection to", addr, ", pool size", p.chanSize)
+		for i := 0; i < p.chanSize; i++ {
+			conn, err := net.Dial("tcp", addr)
+			if err != nil {
+				log.Fatal("failed to dail node " + addr + " " + err.Error())
+			}
+			c := NewConn(conn, 10, 10)
+			p.backend[addr] <- c
+		}
+	}
+}
+
 // initBackend init connection to all redis nodes
 func (p *proxy) initBackend() {
-	p.backend = make(map[string](chan RedisConn), len(p.addrList))
+	//p.backend = make(map[string](chan RedisConn), len(p.addrList))
 	for _, addr := range p.addrList {
 		p.backend[addr] = make(chan RedisConn, p.chanSize)
 		log.Println("init backend connection to", addr, ", pool size", p.chanSize)
@@ -176,13 +193,16 @@ func (p *proxy) slotDo(cmd []byte, id uint16) ([]byte, error) {
 	if !(id >= 0 && id < SLOTSIZE) {
 		return nil, protocolError("slot id out of range: " + string(id))
 	}
-	// RLock
+
+	p.mutex.RLock()
 	addr := p.slotMap[id]
-	// RUnlock
+	p.mutex.RUnlock()
+
 	resp, err := p.exec(cmd, addr)
 	if err == nil {
 		return resp, nil
 	}
+
 	switch errVal := err.(type) {
 	case movedError:
 		// get MOVED error for the first time, follow new address, update slot mapping
