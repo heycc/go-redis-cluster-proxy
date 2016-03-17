@@ -49,7 +49,12 @@ func (p *proxy) GetAddr() {
 
 // close connection
 func (p *proxy) Close() error {
-	// TODO
+	log.Println("closing backen connection")
+	for _, addr := range p.addrList {
+		for conn := range p.addrList[addr] {
+			conn.close()
+		}
+	}
 	return nil
 }
 
@@ -83,19 +88,20 @@ func (p *proxy) init() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	p.initSlotMap()
-	//p.initBackend()
+	p.initSlotMap(false)
 }
 
 // initSlotMap get nodes list and slot distribution
-func (p *proxy) initSlotMap() {
+func (p *proxy) initSlotMap(force bool) {
 	p.adminConn.writeCmd("CLUSTER SLOTS")
 	reply, err := p.adminConn.readReply()
-
 	if err != nil {
 		log.Fatal("cluster slots error. " + err.Error())
 		return
 	}
+
+	p.addrList = make([]string, 0)
+
 	for _, slots := range reply.([]interface{}) {
 		slotsData := slots.([]interface{})
 		slot_from := slotsData[0].(int64)
@@ -106,55 +112,49 @@ func (p *proxy) initSlotMap() {
 		slot_port := addr_tmp[1].(int64)
 		tmpAddr := slot_addr + ":" + strconv.FormatInt(slot_port, 10)
 
-		p.initBackendByAddr(tmpAddr)
-
-		p.mutex.Lock()
-		for i := slot_from; i <= slot_to; i++ {
-			p.slotMap[i] = tmpAddr
+		// add node address to proxy.addrList
+		isNew := true
+		for _, addr := range p.addrList {
+			if tmpAddr == addr {
+				isNew = false
+				break
+			}
 		}
-		p.mutex.Unlock()
+		if isNew {
+			p.addrList = append(p.addrList, tmpAddr)
+		}
+
+		p.initBackendByAddr(tmpAddr, force)
+
+		for i := slot_from; i <= slot_to; i++ {
+			if p.slotMap[i] != tmpAddr{
+				p.mutex.Lock()
+				p.slotMap[i] = tmpAddr
+				p.mutex.Unlock()
+			}
+		}
+		
 	}
 	log.Println("cluster nodes:", p.addrList)
 }
 
-func (p *proxy) initBackendByAddr(addr string) {
-	// add node address to proxy.addrList
-	isNew := true
-	for _, address := range p.addrList {
-		if addr == address {
-			isNew = false
-			break
-		}
-	}
-	if isNew {
-		p.addrList = append(p.addrList, addr)
+func (p *proxy) initBackendByAddr(addr string, force bool) {
+	if _, ok := p.backend[addr]; ! ok {
 		p.backend[addr] = make(chan RedisConn, p.chanSize)
-		log.Println("init backend connection to", addr, ", pool size", p.chanSize)
-		for i := 0; i < p.chanSize; i++ {
-			conn, err := net.Dial("tcp", addr)
-			if err != nil {
-				log.Fatal("failed to dail node " + addr + " " + err.Error())
-			}
-			c := NewConn(conn, 10, 10)
-			p.backend[addr] <- c
-		}
+	} else if ! force {
+		return
 	}
-}
-
-// initBackend init connection to all redis nodes
-func (p *proxy) initBackend() {
-	//p.backend = make(map[string](chan RedisConn), len(p.addrList))
-	for _, addr := range p.addrList {
-		p.backend[addr] = make(chan RedisConn, p.chanSize)
-		log.Println("init backend connection to", addr, ", pool size", p.chanSize)
-		for i := 0; i < p.chanSize; i++ {
-			conn, err := net.Dial("tcp", addr)
-			if err != nil {
-				log.Fatal("failed to dail node " + addr + " " + err.Error())
-			}
-			c := NewConn(conn, 10, 10)
-			p.backend[addr] <- c
+	log.Println("init backend connection to", addr, ", pool size", p.chanSize)
+	for i := 0; i < p.chanSize; i++ {
+		conn, err := net.Dial("tcp", addr)
+		if err != nil {
+			log.Fatal("failed to dail node " + addr + " " + err.Error())
 		}
+		c := NewConn(conn, 10, 10)
+		if force && len(p.backend[addr]) > 0 {
+			<- p.backend[addr]
+		}
+		p.backend[addr] <- c
 	}
 }
 
