@@ -24,6 +24,7 @@ type proxy struct {
 	backend      map[string](chan RedisConn)
 	adminConn    RedisConn
 	slotMapMutex sync.RWMutex
+	backendLock  sync.Mutex
 }
 
 func NewProxy(address string) Proxy {
@@ -39,6 +40,7 @@ func NewProxy(address string) Proxy {
 		backend:      nil,
 		adminConn:    NewConn(net, 10, 10),
 		slotMapMutex: sync.RWMutex{},
+		backendLock:  sync.Mutex{},
 	}
 	p.init()
 	return p
@@ -130,7 +132,7 @@ func (p *proxy) initSlotMap() {
 
 		for i := slot_from; i <= slot_to; i++ {
 			if p.slotMap[i] != tmpAddr {
-				if _, ok := addrDone[tmpAddr]; ! ok {
+				if _, ok := addrDone[tmpAddr]; !ok {
 					p.initBackendByAddr(tmpAddr)
 					addrDone[tmpAddr] = true
 				}
@@ -186,6 +188,15 @@ func (p *proxy) keepalive() {
 }
 
 func (p *proxy) exec(cmd []byte, addr string, ask bool) ([]byte, error) {
+	// TODO: check addr in p.backend
+	if _, ok := p.backend[addr]; !ok {
+		p.backendLock.Lock()
+		if _, ok := p.backend[addr]; !ok {
+			p.initBackendByAddr(addr)
+		}
+		p.backendLock.Unlock()
+	}
+
 	conn := <-p.backend[addr]
 
 	if ask {
