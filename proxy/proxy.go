@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 )
 
 type Proxy interface {
@@ -16,13 +17,13 @@ type Proxy interface {
 }
 
 type proxy struct {
-	totalSlots int
-	slotMap    []string
-	addrList   []string
-	chanSize   int
-	backend    map[string](chan RedisConn)
-	adminConn  RedisConn
-	mutex      sync.RWMutex
+	totalSlots   int
+	slotMap      []string
+	addrList     []string
+	chanSize     int
+	backend      map[string](chan RedisConn)
+	adminConn    RedisConn
+	slotMapMutex sync.RWMutex
 }
 
 func NewProxy(address string) Proxy {
@@ -31,13 +32,13 @@ func NewProxy(address string) Proxy {
 		log.Fatal("failed to dail cluster " + address + " " + err.Error())
 	}
 	p := &proxy{
-		totalSlots: SLOTSIZE,
-		slotMap:    nil,
-		addrList:   nil,
-		chanSize:   BACKENSIZE,
-		backend:    nil,
-		adminConn:  NewConn(net, 10, 10),
-		mutex:      sync.RWMutex{},
+		totalSlots:   SLOTSIZE,
+		slotMap:      nil,
+		addrList:     nil,
+		chanSize:     BACKENSIZE,
+		backend:      nil,
+		adminConn:    NewConn(net, 10, 10),
+		slotMapMutex: sync.RWMutex{},
 	}
 	p.init()
 	return p
@@ -49,9 +50,9 @@ func (p *proxy) GetAddr() {
 
 // close connection
 func (p *proxy) Close() error {
-	log.Println("closing backen connection")
+	log.Println("closing backend connection")
 	for _, addr := range p.addrList {
-		for conn := range p.addrList[addr] {
+		for conn := range p.backend[addr] {
 			conn.close()
 		}
 	}
@@ -88,11 +89,12 @@ func (p *proxy) init() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	p.initSlotMap(false)
+	p.initSlotMap()
+	go p.keepalive()
 }
 
 // initSlotMap get nodes list and slot distribution
-func (p *proxy) initSlotMap(force bool) {
+func (p *proxy) initSlotMap() {
 	p.adminConn.writeCmd("CLUSTER SLOTS")
 	reply, err := p.adminConn.readReply()
 	if err != nil {
@@ -101,6 +103,8 @@ func (p *proxy) initSlotMap(force bool) {
 	}
 
 	p.addrList = make([]string, 0)
+
+	addrDone := make(map[string]bool)
 
 	for _, slots := range reply.([]interface{}) {
 		slotsData := slots.([]interface{})
@@ -124,65 +128,91 @@ func (p *proxy) initSlotMap(force bool) {
 			p.addrList = append(p.addrList, tmpAddr)
 		}
 
-		p.initBackendByAddr(tmpAddr, force)
-
 		for i := slot_from; i <= slot_to; i++ {
-			if p.slotMap[i] != tmpAddr{
-				p.mutex.Lock()
+			if p.slotMap[i] != tmpAddr {
+				if _, ok := addrDone[tmpAddr]; ! ok {
+					p.initBackendByAddr(tmpAddr)
+					addrDone[tmpAddr] = true
+				}
+				p.slotMapMutex.Lock()
 				p.slotMap[i] = tmpAddr
-				p.mutex.Unlock()
+				p.slotMapMutex.Unlock()
 			}
 		}
-		
 	}
 	log.Println("cluster nodes:", p.addrList)
 }
 
-func (p *proxy) initBackendByAddr(addr string, force bool) {
-	if _, ok := p.backend[addr]; ! ok {
+// If force is true, discard current connection regardless of dead or alive,
+// replace it with new connection.
+// Use is when connection is broken.
+func (p *proxy) initBackendByAddr(addr string) {
+	if _, ok := p.backend[addr]; !ok {
+		log.Println("init backend connection to", addr, ", pool size", p.chanSize)
 		p.backend[addr] = make(chan RedisConn, p.chanSize)
-	} else if ! force {
-		return
-	}
-	log.Println("init backend connection to", addr, ", pool size", p.chanSize)
-	for i := 0; i < p.chanSize; i++ {
-		conn, err := net.Dial("tcp", addr)
-		if err != nil {
-			log.Fatal("failed to dail node " + addr + " " + err.Error())
+		for i := 0; i < p.chanSize; i++ {
+			conn, err := net.Dial("tcp", addr)
+			if err != nil {
+				log.Fatal("failed to dail node " + addr + " " + err.Error())
+			}
+			c := NewConn(conn, 10, 10)
+			p.backend[addr] <- c
 		}
-		c := NewConn(conn, 10, 10)
-		if force && len(p.backend[addr]) > 0 {
-			<- p.backend[addr]
+	} else {
+		log.Println("checking backend connection to", addr, ", pool size", p.chanSize)
+		for i := 0; i < p.chanSize; i++ {
+			conn := <-p.backend[addr]
+			if err := conn.ping(); err == nil {
+				p.backend[addr] <- conn
+				break
+			}
+			log.Println("connection to ", addr, " failed, replace with new one")
+			conn1, err := net.Dial("tcp", addr)
+			if err != nil {
+				log.Fatal("failed to dail node " + addr + " " + err.Error())
+			}
+			c := NewConn(conn1, 10, 10)
+			p.backend[addr] <- c
 		}
-		p.backend[addr] <- c
 	}
 }
 
-func (p *proxy) exec(cmd []byte, addr string) ([]byte, error) {
+func (p *proxy) keepalive() {
+	for true {
+		time.Sleep(5 * time.Second)
+		for _, addr := range p.addrList {
+			p.initBackendByAddr(addr)
+		}
+	}
+}
+
+func (p *proxy) exec(cmd []byte, addr string, ask bool) ([]byte, error) {
 	conn := <-p.backend[addr]
+
+	if ask {
+		conn.writeCmd("ASKING")
+		if _, err := conn.readReply(); err != nil {
+			conn.clear()
+			p.backend[addr] <- conn
+			return nil, protocolError("ASKING failed " + err.Error())
+		}
+		conn.clear()
+	}
+
 	conn.writeBytes(cmd)
 	_, err := conn.readReply()
 	resp := conn.getResponse()
 	conn.clear()
 	p.backend[addr] <- conn
 	return resp, err
+}
+
+func (p *proxy) execNoAsk(cmd []byte, addr string) ([]byte, error) {
+	return p.exec(cmd, addr, false)
 }
 
 func (p *proxy) execWithAsk(cmd []byte, addr string) ([]byte, error) {
-	conn := <-p.backend[addr]
-	conn.writeCmd("ASKING")
-	if _, err := conn.readReply(); err != nil {
-		conn.clear()
-		p.backend[addr] <- conn
-		return nil, protocolError("ASKING failed " + err.Error())
-	}
-	conn.clear()
-	conn.writeBytes(cmd)
-	_, err := conn.readReply()
-	resp := conn.getResponse()
-	conn.clear()
-	p.backend[addr] <- conn
-	return resp, err
+	return p.exec(cmd, addr, true)
 }
 
 func (p *proxy) do(cmd []byte) ([]byte, error) {
@@ -194,11 +224,11 @@ func (p *proxy) slotDo(cmd []byte, id uint16) ([]byte, error) {
 		return nil, protocolError("slot id out of range: " + string(id))
 	}
 
-	p.mutex.RLock()
+	p.slotMapMutex.RLock()
 	addr := p.slotMap[id]
-	p.mutex.RUnlock()
+	p.slotMapMutex.RUnlock()
 
-	resp, err := p.exec(cmd, addr)
+	resp, err := p.execNoAsk(cmd, addr)
 	if err == nil {
 		return resp, nil
 	}
@@ -206,7 +236,7 @@ func (p *proxy) slotDo(cmd []byte, id uint16) ([]byte, error) {
 	switch errVal := err.(type) {
 	case movedError:
 		// get MOVED error for the first time, follow new address, update slot mapping
-		resp, err := p.exec(cmd, errVal.Address)
+		resp, err := p.execNoAsk(cmd, errVal.Address)
 		switch errVal := err.(type) {
 		case askError:
 			// ASK error after MOVED error, follow new address

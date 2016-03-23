@@ -19,6 +19,7 @@ type RedisConn interface {
 	// get response remote
 	readReply() (interface{}, error)
 	remoteAddr() string
+	ping() error
 	clear() error
 	close() error
 }
@@ -79,11 +80,6 @@ func (c *redisConn) getResponse() []byte {
 		return nil
 	}
 	return resp
-}
-
-func (c *redisConn) clear() error {
-	c.response.Truncate(0)
-	return nil
 }
 
 func parseInt(p []byte) (int64, error) {
@@ -220,6 +216,18 @@ func (c *redisConn) Do(cmd string) (interface{}, error) {
 	} else {
 		return reply, nil
 	}
+}
+
+func (c *redisConn) ping() error {
+	c.writeCmd("PING")
+	_, err := c.readReply()
+	c.clear()
+	return err
+}
+
+func (c *redisConn) clear() error {
+	c.response.Truncate(0)
+	return nil
 }
 
 func (c *redisConn) remoteAddr() string {
