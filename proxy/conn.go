@@ -135,14 +135,14 @@ func (c *redisConn) readReply() (interface{}, error) {
 			if err != nil {
 				return nil, protocolError("MOVED error parse slot failed: " + err.Error())
 			}
-			return nil, movedError{Slot: slot, Address: lineArr[2]}
+			return nil, &movedError{Slot: slot, Address: lineArr[2]}
 		// ASK
 		case len(lineArr) == 3 && lineArr[0] == "-ASK":
 			slot, err := strconv.ParseInt(lineArr[1], 10, 64)
 			if err != nil {
 				return nil, protocolError("ASK error parse slot failed: " + err.Error())
 			}
-			return nil, askError{Slot: slot, Address: lineArr[2]}
+			return nil, &askError{Slot: slot, Address: lineArr[2]}
 		default:
 			return nil, protocolError(string(line[1:]))
 		}
@@ -206,9 +206,9 @@ func (c *redisConn) Do(cmd string) (interface{}, error) {
 	reply, err := c.readReply()
 	if err != nil {
 		switch err := err.(type) {
-		case movedError:
+		case *movedError:
 			return fmt.Sprintf("moved to %s", err.Address), nil
-		case askError:
+		case *askError:
 			return fmt.Sprintf("ask %s", err.Address), nil
 		default:
 			return nil, protocolError(fmt.Sprintf("%T", err))

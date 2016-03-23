@@ -244,20 +244,20 @@ func (p *proxy) slotDo(cmd []byte, id uint16) ([]byte, error) {
 	}
 
 	switch errVal := err.(type) {
-	case movedError:
+	case *movedError:
 		// get MOVED error for the first time, follow new address, update slot mapping
 		resp, err := p.execNoAsk(cmd, errVal.Address)
 		switch errVal := err.(type) {
-		case askError:
+		case *askError:
 			// ASK error after MOVED error, follow new address
 			return p.execWithAsk(cmd, errVal.Address)
-		case movedError:
+		case *movedError:
 			// MOVED error after MOVED error, this shouldn't happen
 			return nil, protocolError("Error! MOVED after MOVED")
 		default:
 			return resp, errVal
 		}
-	case askError:
+	case *askError:
 		// get ASK error for the first time, follow new address
 		return p.execWithAsk(cmd, errVal.Address)
 	default:
