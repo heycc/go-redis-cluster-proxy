@@ -100,14 +100,14 @@ func (sess *session) close(err error) {
 	log.Println("connection closed:",
 		err.Error(),
 		", create at:",
-		sess.ts,
+		sess.ts.Format(time.Stamp),
 		", closed at:",
-		time.Now(),
+		time.Now().Format(time.Stamp),
 		", ops:",
 		sess.ops,
-		", time(µs):",
+		", microseconds:",
 		sess.microsecond,
-		", addr:",
+		", remote:",
 		sess.remoteAddr())
 }
 

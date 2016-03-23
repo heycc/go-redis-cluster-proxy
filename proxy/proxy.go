@@ -159,7 +159,6 @@ func (p *proxy) initBackendByAddr(addr string) {
 			p.backend[addr] <- c
 		}
 	} else {
-		log.Println("checking backend connection to", addr, ", pool size", p.chanSize)
 		for i := 0; i < p.chanSize; i++ {
 			conn := <-p.backend[addr]
 			if err := conn.ping(); err == nil {
