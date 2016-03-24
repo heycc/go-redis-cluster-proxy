@@ -131,7 +131,10 @@ func (p *proxy) initSlotMap() {
 		}
 
 		for i := slot_from; i <= slot_to; i++ {
+			// When slot migrated
 			if p.slotMap[i] != tmpAddr {
+				// Many slots may mapped to the same backend,
+				// calling initBackendByAddr only once is enough
 				if _, ok := addrDone[tmpAddr]; !ok {
 					p.initBackendByAddr(tmpAddr)
 					addrDone[tmpAddr] = true
@@ -145,10 +148,10 @@ func (p *proxy) initSlotMap() {
 	log.Println("cluster nodes:", p.addrList)
 }
 
-// If force is true, discard current connection regardless of dead or alive,
-// replace it with new connection.
-// Use is when connection is broken.
+// initBackendByAddr init connections to a node, it may by triggered by many routines,
+// so use mutex for concurrency safe
 func (p *proxy) initBackendByAddr(addr string) {
+	p.backendLock.Lock()
 	if _, ok := p.backend[addr]; !ok {
 		log.Println("init backend connection to", addr, ", pool size", p.chanSize)
 		p.backend[addr] = make(chan RedisConn, p.chanSize)
@@ -160,21 +163,26 @@ func (p *proxy) initBackendByAddr(addr string) {
 			c := NewConn(conn, 10, 10)
 			p.backend[addr] <- c
 		}
-	} else {
-		for i := 0; i < p.chanSize; i++ {
-			conn := <-p.backend[addr]
-			if err := conn.ping(); err == nil {
-				p.backend[addr] <- conn
-				break
-			}
-			log.Println("connection to ", addr, " failed, replace with new one")
-			conn1, err := net.Dial("tcp", addr)
-			if err != nil {
-				log.Fatal("failed to dail node " + addr + " " + err.Error())
-			}
-			c := NewConn(conn1, 10, 10)
-			p.backend[addr] <- c
+	}
+	p.backendLock.Unlock()
+}
+
+// checkBackendByAddr check all **KNOWN** connections to all nodes are healthy,
+// triggered by periodly keepalive()
+func (p *proxy) checkBackendByAddr(addr string) {
+	for i := 0; i < p.chanSize; i++ {
+		conn := <-p.backend[addr]
+		if err := conn.ping(); err == nil {
+			p.backend[addr] <- conn
+			continue
 		}
+		log.Println("connection to ", addr, " failed, replace with new one")
+		conn1, err := net.Dial("tcp", addr)
+		if err != nil {
+			log.Fatal("failed to dail node " + addr + " " + err.Error())
+		}
+		c := NewConn(conn1, 10, 10)
+		p.backend[addr] <- c
 	}
 }
 
@@ -182,19 +190,16 @@ func (p *proxy) keepalive() {
 	for true {
 		time.Sleep(5 * time.Second)
 		for _, addr := range p.addrList {
-			p.initBackendByAddr(addr)
+			p.checkBackendByAddr(addr)
 		}
+		p.initSlotMap()
 	}
 }
 
 func (p *proxy) exec(cmd []byte, addr string, ask bool) ([]byte, error) {
-	// TODO: check addr in p.backend
+	// Make sure there are available connection to `addr`
 	if _, ok := p.backend[addr]; !ok {
-		p.backendLock.Lock()
-		if _, ok := p.backend[addr]; !ok {
-			p.initBackendByAddr(addr)
-		}
-		p.backendLock.Unlock()
+		p.initBackendByAddr(addr)
 	}
 
 	conn := <-p.backend[addr]
