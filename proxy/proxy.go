@@ -139,13 +139,15 @@ func (p *proxy) initSlotMap() {
 					p.initBackendByAddr(tmpAddr)
 					addrDone[tmpAddr] = true
 				}
+				if p.slotMap[i] != "" {
+					log.Println("slot migrated, id:", i, "from:", p.slotMap[i], "to:", tmpAddr)
+				}
 				p.slotMapMutex.Lock()
 				p.slotMap[i] = tmpAddr
 				p.slotMapMutex.Unlock()
 			}
 		}
 	}
-	log.Println("cluster nodes:", p.addrList)
 }
 
 // initBackendByAddr init connections to a node, it may by triggered by many routines,
@@ -153,6 +155,7 @@ func (p *proxy) initSlotMap() {
 func (p *proxy) initBackendByAddr(addr string) {
 	p.backendLock.Lock()
 	if _, ok := p.backend[addr]; !ok {
+		log.Println("cluster nodes:", p.addrList)
 		log.Println("init backend connection to", addr, ", pool size", p.chanSize)
 		p.backend[addr] = make(chan RedisConn, p.chanSize)
 		for i := 0; i < p.chanSize; i++ {

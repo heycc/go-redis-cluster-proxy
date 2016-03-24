@@ -32,7 +32,7 @@ func NewSession(net net.Conn) Session {
 }
 
 func (sess *session) Loop(proxy Proxy) error {
-	log.Println("new connection:", sess.remoteAddr())
+	log.Println("new session, remote:", sess.remoteAddr(), ", create at:", sess.ts.Format(time.Stamp))
 	for {
 		req_obj, err := sess.readReq()
 		if err != nil {
