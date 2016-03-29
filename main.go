@@ -2,6 +2,7 @@ package main
 
 import (
 	"./proxy"
+	"./dashboard"
 	"fmt"
 	"net"
 	"runtime"
@@ -10,7 +11,14 @@ import (
 func main() {
 	runtime.GOMAXPROCS(4)
 
-	addr := "127.0.0.1:7101"
+	//proxyAddr := "127.0.0.1:7101"
+	//startProxy(proxyAddr)
+
+	dashboardAddr := "127.0.0.1:7102"
+	startDashboard(dashboardAddr)
+}
+
+func startProxy(addr string) {
 	server := proxy.NewProxy(addr)
 
 	ln, err := net.Listen("tcp", ":7011")
@@ -35,4 +43,9 @@ func main() {
 			ch <- conn
 		}
 	}
+}
+
+func startDashboard(addr string) {
+	dashboard := dashboard.NewDashboard(addr)
+	dashboard.Start()
 }
